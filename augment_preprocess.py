@@ -111,10 +111,20 @@ def save_annotations(annotations, output_dir, file_name):
             file.write(' '.join(map(str, ann)) + '\n')
 
 if __name__ == '__main__':
-    output_dir = r'/Users/michelewiseman/Downloads/output'
-    image_dir = r'/Users/michelewiseman/Downloads/TSSM Detection v2.v34i.yolov5pytorch/test/images'
-    annotation_dir = r'/Users/michelewiseman/Downloads/TSSM Detection v2.v34i.yolov5pytorch/test/labels'
-    num_augmentations_per_image = 3
+    import argparse
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--output_dir', type=str, default="/Users/michelewiseman/Downloads/output", required=True, help="Directory to save augmented images and annotations")
+    parser.add_argument('--image_dir', type=str, default="/Users/michelewiseman/Downloads/TSSM Detection v2.v34i.yolov5pytorch/valid/images", required=True, help="Directory containing images to augment")
+    parser.add_argument('--annotation_dir', default="/Users/michelewiseman/Downloads/TSSM Detection v2.v34i.yolov5pytorch/valid/labels", type=str, required=True, help="Directory containing annotations to augment")
+    parser.add_argument('--num_augmentations_per_image', type=int, default=5, required=True, help="Number of augmentations to apply to each image")
+
+    args = parser.parse_args()
+
+    output_dir = args.output_dir
+    image_dir = args.image_dir
+    annotation_dir = args.annotation_dir
+    num_augmentations_per_image = args.num_augmentations_per_image
 
     for image_name in os.listdir(image_dir):
         image_path = os.path.join(image_dir, image_name)
