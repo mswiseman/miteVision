@@ -4,6 +4,12 @@ import cv2
 import os
 import random
 
+'''
+This script is used to augment images and their annotations for object detection. 
+It uses the YOLO format for annotations. 
+
+Written by Michele Wiseman, December 5th 2023
+'''
 
 def rotate_bbox_content(image, bbox, angle, interpolation=cv2.INTER_LINEAR, border_mode=cv2.BORDER_CONSTANT,
                         border_value=(0, 0, 0)):
@@ -66,7 +72,6 @@ def get_augmentation_pipeline():
     return A.Compose([
         A.HorizontalFlip(p=0.5),
         A.VerticalFlip(p=0.5),
-        A.Rotate(limit=90, p=0.5),
         # Add more augmentations here as needed
     ], bbox_params=A.BboxParams(format='yolo', min_visibility=0.3, label_fields=['class_labels']))
 
@@ -85,7 +90,7 @@ def apply_augmentations(image, annotations, augmentation_pipeline):
     # Rotate some bounding boxes' contents
     for i, bbox in enumerate(augmented_bboxes):
         if random.random() < 0.1:  # 10% chance to rotate
-            augmented_image = rotate_bbox_content(augmented_image, bbox, angle=90)
+            augmented_image = rotate_bbox_content(augmented_image, bbox, angle=180)
 
     # Reattach class labels and clip the bounding boxes
     clipped_bboxes = []
