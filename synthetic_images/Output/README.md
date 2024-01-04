@@ -1,3 +1,5 @@
 This directory contains examples of output files. The actual output files used in the study are uploaded to the dataset hosted on [roboflow](https://app.roboflow.com/gent-lab/tssm-balanced-and-gendered/).
 
+Example of a synthetic image with bounding boxes:
 
+![synthetic image with bounding boxes](https://github.com/mswiseman/miteVision/blob/main/assets/images/example_synthetic_image_with_bb.png?raw=true)
