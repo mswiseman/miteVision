@@ -6,7 +6,7 @@ import pandas as pd
 from tqdm import tqdm
 import logging
 
-# example usage: python calculate_std_dev.py /path/to/images
+# example usage: python calculate_mean_std.py --directory /path/to/images
 
 def is_image_file(filename):
     """
@@ -150,7 +150,7 @@ def main():
 
     parser = argparse.ArgumentParser(
         description="Calculate average and std RGB values for each category in nested directories, excluding black padding.")
-    parser.add_argument("directory", type=str, help="Path to the root directory containing category subdirectories.")
+    parser.add_argument("--directory", type=str, help="Path to the root directory containing category subdirectories.")
     parser.add_argument("--threshold", type=int, default=0,
                         help="Threshold to consider a pixel as non-padding (default: 0). Pixels with all RGB <= threshold are treated as padding.")
     parser.add_argument("--output", type=str, default=None, help="Path to save the results as a CSV file (optional).")
