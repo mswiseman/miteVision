@@ -103,8 +103,8 @@ def process_combined_masks(images_dir, masks_dir, output_dir):
 
 # Example usage
 images_dir = './Output'
-masks_dir = './Masks'  # Path to combined masks
-output_dir = './Segmentation_Annotations'
+masks_dir = './Output/Masks'  # Path to combined masks
+output_dir = './Output/Segmentation_Annotations'
 process_combined_masks(images_dir, masks_dir, output_dir)
 
 print("Converting combined masks to YOLO format completed.")
