@@ -1,0 +1,1 @@
+These are the original synthetic images for which you'd like to swap the background out for another background. Note: only a few are uploaded due to GitHubs size restrictions. You can download the full dataset [here](https://oregonstate.box.com/s/pwak6vbnyqgrlsltk2wcmvbv8ubjy4zr).
