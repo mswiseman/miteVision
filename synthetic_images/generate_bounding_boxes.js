@@ -1,3 +1,5 @@
+// node generate_bounding_boxes.js
+
 // system packages
 const fs = require('fs');
 const path = require('path');
@@ -16,17 +18,17 @@ var Handlebars = require('handlebars');
 var vocTemplate = Handlebars.compile(fs.readFileSync(__dirname + "/voc.tmpl", "utf-8"));
 
 // how many images we want to create
-const IMAGES_TO_GENERATE = 10;
+const IMAGES_TO_GENERATE = 30;
 // how many to generate at one time
 const CONCURRENCY = Math.max(1, os.cpus().length - 1);
 
 // approximate aspect ratio of our phone camera
 // scaled to match the input of CreateML models
-const CANVAS_WIDTH = 1024;
-const CANVAS_HEIGHT = 1024;
+const CANVAS_WIDTH = 8254;
+const CANVAS_HEIGHT = 5502;
 
 // the most objects you want in your generated images
-const MAX_OBJECTS = 100;
+const MAX_OBJECTS = 50;
 
 // where to store our images
 const OUTPUT_DIR = path.join(__dirname, "Output");
@@ -78,9 +80,11 @@ _.each(folders, function(folder, i) {
 
 // Example class weights - the higher the number, the more likely the class is to be selected
 const classWeights = {
-    'Dead_mite': 1, // weight 1
-    'Adult_female': 1, // weight 1
-    'Adult_male': 0.005//
+    'Immature': 0.3, // weight
+    'Viable_egg': 0.1, // weight
+    'Adult_female': 0.9, // weight
+    'Dead_mite': 0.3, // weight
+    'Adult_male': 1//
   // ... add weights for all classes
 };
 
@@ -227,8 +231,8 @@ const addRandomObject = function(canvas, context, cb) {
         objectContext.randomHSL(0.00, 0.1, 0.1); // change the hue, saturation, and lightness
 
         // randomly scale the image
-        var baseScale = 0.20; // Base scale increased by 20%
-        var scaleVariation = 0.01; // Variation of scale
+        var baseScale = 1; // Base scale increased by 20%
+        var scaleVariation = 0.02; // Variation of scale
         const scale = baseScale + Math.random() * scaleVariation * 2 - scaleVariation; // Randomly scale
 
         var w = img.width * scale; // width of the object
