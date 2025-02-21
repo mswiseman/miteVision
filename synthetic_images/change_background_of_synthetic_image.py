@@ -20,11 +20,11 @@ Michele Wiseman
 random.seed(42)
 
 # Define folder paths.
-images_dir = "./synthetic_images_dataset_v65/train/images"                        # Folder with synthetic images to process.
-labels_dir = "./synthetic_images_dataset_v65/train/labels"                        # Folder with corresponding annotation labels.
-backgrounds_dir = "./synthetic_images_dataset_v65/train/replacement_backgrounds"  # Folder with new background images.
-output_images_dir = "./synthetic_images_dataset_v65/train/new_images"             # Output folder for processed images.
-output_labels_dir = "./synthetic_images_dataset_v65/train/new_labels"             # Output folder for renamed label files.
+images_dir = "./background_swap/images"                        # Folder with synthetic images to process.
+labels_dir = "./background_swap/old_labels"                        # Folder with corresponding annotation labels.
+backgrounds_dir = "./background_swap/replacement_backgrounds"  # Folder with new background images.
+output_images_dir = "./background_swap/new_images"             # Output folder for processed images.
+output_labels_dir = "./background_swap/new_labels"             # Output folder for renamed label files.
 
 # Create output directories if they do not exist.
 os.makedirs(output_images_dir, exist_ok=True)
