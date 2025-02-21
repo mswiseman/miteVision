@@ -12,7 +12,7 @@ This directory has the necessary components to create synthetic images.
 
 `convert_masks_to_yolo.py`:
 - requires directories where images and masks from `generate_segmentation.js` are located (`./Output` and `./Output/Masks`).
-- produces YOLO polygon annotation label
+- produces YOLO polygon annotation label saved to `./Output/Segmentation_Annotations`
 
 `generate_bounding_boxes.js`: 
 - requires segmented training data separated by class in directories under `./Training`
