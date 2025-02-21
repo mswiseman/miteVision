@@ -1,1 +1,0 @@
-These are the new backgrounds you are swapping in labels when running `change_background_of_synthetic_image.py`. Note: only a few are uploaded due to GitHubs size restrictions. You can download the full dataset [here](https://oregonstate.box.com/s/pwak6vbnyqgrlsltk2wcmvbv8ubjy4zr).
