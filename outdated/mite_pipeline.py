@@ -1,3 +1,5 @@
+# the three model binary system ended up compounding errors to an unacceptable degree, so this approach was scratched. Retaining code for future reference. 
+
 import torch
 import torchvision.transforms as T
 from ultralytics import YOLO
