@@ -20,6 +20,8 @@ max_workers = 4 # alter based on CPU core availability
 Written by Michele Wiseman of Oregon State University
 October 23rd, 2023
 Version 1.0
+
+Note: this was made to process file paths created by software running the Blackbird robot (Moblanc Robotics, Spain), but the script can easily be adapted to process Z-stacks from any camera. 
 '''
 
 input_dir = "D:/Unstacked/"
