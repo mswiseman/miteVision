@@ -2,7 +2,7 @@
 
 # Introduction
 
-# Overiview
+# Overview
 
 The code and logs for training the most recent classification and segmentation models can be [here](classification_and_segmentation_training_runs.ipynb).
 
@@ -19,9 +19,10 @@ All data and models are hosted on [Roboflow](https://universe.roboflow.com/gent-
 | [v118](https://universe.roboflow.com/gent-lab/tssm-detection-instance-segmentation/model/118) | Instance Segmentation | With synthetic data, patience = 25, no pre-train augmentations | Val |  40 | 639   |  0.898     |  0.892    |  0.927 |  0.704 |   4    | Adult_female, Adult_male, Immature, Viable_egg            
 
 
-To enable easier reproduction of our results, the referenced test sets and models in Wiseman et al. 2025 have been hosted separately [here](https://drive.google.com/drive/folders/1j1TDOzc_pnrFiZmaGc7LjP3S_jW6tjHo?usp=sharing). 
+To enable easier reproduction of our results, the referenced test sets and models in Wiseman et al. 2025 have been hosted separately [here](https://doi.org/10.5281/zenodo.16945379) and [here](https://doi.org/10.5281/zenodo.16945337), respectively. 
 
 # Contact
-
+Michele Wiseman:
+<michele.wiseman@oregonstate.edu>
 
 
