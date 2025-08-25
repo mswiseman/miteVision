@@ -1,0 +1,3 @@
+The .Rmd for most of the graphical visualizations in the manuscript can be found here. To reproduce the visualizations and statistical results, download the .Rmd file and the [csvs](https://github.com/mswiseman/miteVision/tree/main/datasheets). Next, install any missing R packages using `install.packages([package_name])`. Finally, update the absolute paths to reflect your file structure. A few minor aesethic alterations (e.g. adding subfigure labels) were made to some of the figures using Microscoft Powerpoint or Adobe Photoshop. 
+
+The confusion matrices were created as a by-product of YOLOv11 training. Code and output from training runs can be found [here](https://github.com/mswiseman/miteVision/blob/main/classification_and_segmentation_training_runs.ipynb). 
