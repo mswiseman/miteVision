@@ -1,0 +1,2 @@
+This folder contains a bash script that provides examples of how call `inference_testing.py` jobs in series as well as the actual inference testing script. Inference testing, even with all the print-outs and outputs, runs pretty fast; however, you can parallelize it if you have the computational capacity (put the commands in an array, define a max_jobs value, and then loop through execution of commands until max_jobs is reached).
+
