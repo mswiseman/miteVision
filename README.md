@@ -7,7 +7,7 @@ Here, we present a high-throughput, semi-automated image analysis pipeline integ
 
 ## Overview
 
-Training and evaluation logs for models v209, v210, and v211 can be found [here](). Exhaustive code and logs for training of several other iterative classification and segmentation models as well as leaf damage modeling can be found [here](classification_and_segmentation_training_runs.ipynb) (note: a lot of this was deemed outside the scope of our paper, but I thought I'd include it in case it's helpful for anyone).
+Training and evaluation logs for models v209, v210, and v211 can be found [here](v209_v210_v211_train_eval.ipynb). 
 
 All referenced data and models are hosted on [Roboflow](https://universe.roboflow.com/gent-lab/). Performance metrics and specifications can be found below:
 
