@@ -8,6 +8,14 @@ import random
 This script is used to augment images and their annotations for object detection. 
 It uses the YOLO format for annotations. 
 
+Example usage: 
+
+python augment_yolo_dataset.py \
+  --image_dir /path/to/images \
+  --annotation_dir /path/to/labels \
+  --output_dir /path/to/output \
+  --num_augmentations_per_image 5
+
 Written by Michele Wiseman, December 5th 2023
 '''
 
