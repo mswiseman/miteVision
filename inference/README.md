@@ -2,7 +2,8 @@
 
 This folder contains a bash script ([`jobs.sh`](jobs.sh)) that provides examples of how call [`inference_testing.py`](inference_testing.py) jobs in series as well as the actual inference testing script. 
 
-![inference_testing.py output examples](/assets/images/inference_testing_outputs.jpg)
+![example of custom inference testing outputs](/assets/images/example_outputs.png)
+**Examples of a few types of outputs provided by `inference_testing.py`.** A. Output of predictions and ground truth overlaid on the original image. B. Missed detection map output - shows where the missed detections were found and helps diagnose performance issues. 
 
 ## Requirements
 Python 3.9-3.11, [CUDA](https://developer.nvidia.com/cuda-toolkit) (if you want to utilize GPU) as well as:
