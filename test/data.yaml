@@ -1,0 +1,8 @@
+test: ./images
+
+nc: 5
+names: ['Adult_female', 'Adult_male', 'Dead_mite', 'Immature', 'Viable_egg']
+
+roboflow:
+  workspace: gent-lab
+  project: tssm-detection-v2
