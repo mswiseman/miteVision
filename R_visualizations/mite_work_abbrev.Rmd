@@ -1,0 +1,1614 @@
+---
+title: "Two-Spotted Spider Mite Model Evaluations (Stats and Visualizations)"
+author: "Michele S. Wiseman"
+date: "2025-06-10"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+## Set-up
+Load required packages or install as necessary. 
+
+```{r load libraries, message=FALSE, warning=FALSE}
+library(readxl)
+library(stringr)
+library(ggplot2)
+library(mgcv)
+library(purrr)
+library(tidyr)
+library(forcats)
+library(ggpmisc)
+library(devtools)
+library(readr)
+library(ggpubr)
+library(pracma)
+library(dplyr)
+library(lme4)
+library(drc)
+library(emmeans)
+library(multcomp)
+library(multcompView)
+library(MuMIn)
+library(effectsize)
+library(ggrepel)
+library(lessR)
+library(broom)
+
+# print R version
+print(paste("R version:", R.version$version.string))
+
+# uncomment line below and run if you need to install any of these
+# install.packages(c("readxl", "stringr", "ggplot2", "mgcv", "purrr", "tidyr", "forcats", "ggpmisc", "devtools", "readr", "ggpubr", "pracma", "dplyr", "lme4", "drc", "emmeans", "multcomp", "multcompView", "MuMIn", "effectsize", "ggrepel", "lessR", "broom"))
+
+```
+
+## Load spreadsheets
+
+We're testing whether there are differences in fecunidty of gravid females on three different hop cultivars: Cascade, Pacific Gem, and Nugget.  
+
+```{r, load cultivar data}
+
+# Load cultivar screening data
+df <- read_csv("./datasheets/mite_cultivar_screening_subset.csv")
+
+# Load other host and occlusion leaf testing data
+df2 <- read_xlsx("./datasheets/concat_test_results_mite_models.xlsx")
+
+# Exclude padded data (suboptimal performance compared to unpadded)
+df2 <- df2 %>% 
+  filter(Padded != "TRUE")
+
+# Load miticidal data
+df3<-read.csv("./datasheets/floramite_day_5.csv")
+```
+
+# Cultivar fecundity testing
+## Calculate area under curve and model fecundity data for the cultivar screening
+
+```{r, cultivar fecundity modeling}
+# Calculate individual-level AUC (each Image_name is a replicate)
+individual_auc <- df %>%
+  group_by(Cultivar, Image_name, Run) %>%
+  arrange(DPI) %>%
+  mutate(Run = factor(Run)) %>%
+  summarize(AUC = trapz(DPI, Ground_truth)) %>%
+  ungroup()
+
+# pull out cultivars with three or more runs
+individual_auc <- individual_auc %>%
+  filter(Cultivar %in% c("Nugget", "Pacific_Gem", "Cascade"))
+
+# run is fixed
+m1<-lm(AUC ~ Cultivar + Run, data = individual_auc)
+
+# run is random (more typical)
+m2 <- lmer(AUC ~ Cultivar + (1 | Run), data = individual_auc)
+
+# look at residuals
+resid_vals <- resid(m1)
+resid_vals_m2 <- resid(m2)
+
+
+m1
+m2
+```
+
+## Look at effect size
+
+```{r, compare random vs fixed effect}
+# marginal R² (fixed effects only) and conditional R² (fixed + random effects)
+r2 <- r.squaredGLMM(m1)
+
+# marginal R² (fixed effects only) and conditional R² (fixed + random effects)
+r2_2 <- r.squaredGLMM(m2)
+
+# standardized coefficients (like beta weights or Cohen's d)
+std <- standardize_parameters(m1)
+std_2 <- standardize_parameters(m2)
+
+print("run as a fixed effect")
+std
+
+print("run as a random effect")
+std_2
+
+print("run as a fixed effect")
+r2
+
+print("run as a random effect")
+r2_2
+
+
+
+```
+
+## Normality checks
+
+```{r, normality checks}
+
+# plot indivual_auc
+hist(individual_auc$AUC,
+     breaks = 15,
+     probability = TRUE,
+     main = "Histogram of individual AUC",
+     xlab = "AUC",
+     col = "lightgray")
+lines(density(individual_auc$AUC), lwd = 2, col = "blue")
+
+qqnorm(individual_auc$AUC,
+       main = "QQ-Plot of individual AUC")
+qqline(individual_auc$AUC, col = "red", lwd = 2)
+
+by_cultivar_sw <- individual_auc %>%
+  group_by(Cultivar) %>%
+  summarize(
+    N       = n(),
+    mean    = mean(AUC),
+    median  = median(AUC),
+    sd      = sd(AUC),
+    shapiro_p = if (n() >= 3 && n() <= 5000) {
+      shapiro.test(AUC)$p.value
+    } else {
+      NA_real_
+    }
+  )
+
+print(by_cultivar_sw)
+
+# Residuals QQ‐plot
+qqnorm(resid_vals); qqline(resid_vals)
+
+# Shapiro on residuals
+shapiro.test(resid_vals)
+
+```
+
+## LMM modeling with Nugget, Pgem, and Cascade
+
+```{r, lmm modeling}
+
+# This “Tukey” adjustment is the classic choice when you have more than two treatments and you want all pairwise contrasts at a family‐wise error rate of 0.05. Because your three runs are accounted for as a random effect, the standard errors and denominator degrees of freedom come out correctly (this is sometimes referred to as the “Tukey–Kramer” adjustment if sample sizes differ
+emm <- emmeans(m1, ~ Cultivar) 
+emm2 <- emmeans(m2, ~ Cultivar) 
+
+tuk_pairs <- pairs(emm, adjust = "tukey")
+tuk_pairs2 <- pairs(emm2, adjust = "tukey")
+
+tuk_df <- summary(tuk_pairs)
+tuk_df2 <- summary(tuk_pairs2)
+
+cld_df <- cld(tuk_pairs,
+              Letters = letters,
+              sort    = TRUE)
+cld_df2 <- cld(tuk_pairs2,
+              Letters = letters,
+              sort    = TRUE)
+
+#tuk_glht <- glht(m1, linfct = mcp(Cultivar = "Tukey"))
+#cld_df <- cld(tuk_glht, Letters = letters)
+
+# run as a fixed effect
+print("This model treats run as a fixed effect:")
+cld_df
+
+# run as a random effect
+print("This model treats run as a random effect:")
+cld_df2
+
+```
+
+## Plot cultivar differences
+
+```{r, visualize cultivar differences}
+max_auc <- individual_auc %>%
+  group_by(Cultivar) %>%
+  summarize(maxAUC = max(AUC), .groups = "drop")
+
+
+individual_auc$Cultivar <- factor(individual_auc$Cultivar)
+cultivars <- levels(individual_auc$Cultivar)
+n <- length(cultivars)
+
+n
+p_mat <- matrix(NA, nrow = n, ncol = n,
+                dimnames = list(cultivars, cultivars))
+
+for (i in seq_len(nrow(tuk_df))) {
+  pair_names <- strsplit(tuk_df$contrast[i], " - ")[[1]]
+  C1 <- pair_names[1]
+  C2 <- pair_names[2]
+  pval <- tuk_df$p.value[i]
+  
+  # Place pval into symmetric positions
+  p_mat[C1, C2] <- pval
+  p_mat[C2, C1] <- pval
+}
+
+diag(p_mat) <- NA
+print(p_mat)
+
+letters_named <- multcompLetters(p_mat)$Letters
+print(letters_named)
+
+cl_per_cult <- data.frame(
+  Cultivar = names(letters_named),
+  .group   = unname(letters_named),
+  stringsAsFactors = FALSE
+)
+
+max_auc <- individual_auc %>%
+  group_by(Cultivar) %>%
+  summarize(maxAUC = max(AUC), .groups = "drop")
+
+letter_positions <- cl_per_cult %>%
+  left_join(max_auc, by = "Cultivar") %>%
+  mutate(y_pos = maxAUC + 10)
+
+desired_order <- cl_per_cult$Cultivar
+
+individual_auc <- individual_auc %>%
+  mutate(Cultivar = factor(Cultivar, levels = desired_order))
+
+letter_positions <- letter_positions %>%
+  mutate(Cultivar = factor(Cultivar, levels = desired_order))
+
+# set order of cultivar to Cascade, Pacific_Gem, and then Nugget
+individual_auc$Cultivar <- factor(individual_auc$Cultivar, levels = c("Cascade", "Pacific_Gem", "Nugget"))
+
+ggplot(individual_auc, aes(x = Cultivar, y = AUC, fill = Cultivar)) +
+  geom_boxplot(width = 0.6, outlier.shape = NA, alpha = 0.6) +
+  geom_jitter(width = 0.1, size = 2, alpha = 0.8, shape = 21, color = "black") +
+  scale_fill_viridis_d(
+    name = "Cultivar",
+  ) +
+  # Make y_pos = maxAUC + 5% of the data range
+  geom_text(
+    data = letter_positions %>%
+             mutate(y_pos = maxAUC + 0.05 * (max(individual_auc$AUC) - min(individual_auc$AUC))),
+    aes(x = Cultivar, y = y_pos, label = .group),
+    size = 5,
+    fontface = "bold",
+    color = "black"
+  ) +
+  labs(
+    title    = "Area Under Curve (AUC) of Egg Laying \n Rate by Cultivar (5 days)",
+    x        = "Hop Cultivar",
+    y        = "AUC (egg laying over 5 days)",
+#    caption  = "Letters: Tukey HSD groupings (α = 0.05), n = 18 per cultivar"
+  ) +
+  theme_classic(base_size = 14) +
+  theme(
+    axis.title           = element_text(face = "bold"),
+    axis.text.x          = element_text(angle = 20, hjust = 1),
+    axis.text.y          = element_text(size = 12),
+    legend.position      = "none",
+    plot.title           = element_text(size = 14, face = "bold", hjust = 0.5),
+    plot.caption         = element_text(size = 9, hjust = 0)
+  ) 
+
+# save plot
+ggsave("AUC_by_cultivar.png", width = 5, height = 6, dpi = 300)
+
+```
+
+## Pgem Nug Cas test set 
+
+```{r, pearsons and lms}
+# subset just the images acquired when testing the fecundity system
+df_leaf_assay_test_set <- df2 %>%
+  dplyr::filter(!grepl("cascade_mites_rnd2", Image_name)) %>%  # these were from GH samples, not the fecundity testing hence excluding them
+  dplyr::filter(!grepl("cascade_mites", Image_name)) %>% # these were from GH samples, not the fecundity testing hence excluding them
+  dplyr::filter(!grepl("nugget_mites", Image_name)) %>% # these were from GH samples, not the fecundity testing hence excluding them
+  dplyr::filter(Cultivar %in% c("Cascade", "Pacific_Gem", "Nugget"))
+
+# run pearsons correlation on cultivar/class/detections vs cultivar/class/groundtruth
+pearson_results <- df_leaf_assay_test_set %>%
+   dplyr::filter(!Class == "Immature")  %>% # not enough observerations for this class, will return errors
+  group_by(Model_version, Cultivar, Class) %>%
+  summarize(
+    r = cor(Total_GT, Total_detections, method = "pearson"),
+    p_val = cor.test(Total_GT, Total_detections, method = "pearson")$p.value,
+    total_gt = sum(Total_GT),
+    n_images = n()
+  ) %>%
+  ungroup()
+
+# note NA typically indicates perfect agreement
+pearson_results
+
+# you can check why it's NA by filtering for the combo that gave it to see why...
+df2 %>% 
+  filter(Cultivar == "Pacific_Gem", Class == "Adult_female", Model_version == "209") %>%
+  dplyr::select(Total_GT, Total_detections)
+
+# plot ground truth vs predicted
+palette <- c("#F3B341","#6F5EE7","#CB377D","#EC6A2C","#668DF5")
+
+# fit linear model
+df_leaf_assay_test_set %>%
+  ggplot(aes(x = Total_GT, y = Total_detections, color = Class)) +
+  geom_point() +
+  geom_abline(slope = 1, intercept = 0, color = "black", linetype = "dashed") +
+  geom_smooth(method = "lm", se = FALSE) +
+  stat_poly_eq(
+    aes(
+      label = paste(..eq.label.., ..rr.label.., sep = "~~~")
+    ),
+    formula = y ~ x,
+    parse = TRUE,
+    color= "black",
+  ) +
+  facet_wrap(Model_version~Cultivar) +
+  labs(
+    title = "Ground Truth vs. Predicted Detections (Subset of Leaf Fecundity Data)",
+    x = "Ground Truth",
+    y = "Computer Vision Detections Split by Model Version"
+  ) +
+  theme_classic() +
+  scale_color_manual(values = palette)
+
+# save image
+ggsave("ground_truth_vs_predicted_split_by_cv_pgem_nug_cas_lm.pdf", width = 10, height = 10, dpi = 300)
+
+# Pearson's
+df_leaf_assay_test_set %>%
+  ggplot(aes(x = Total_GT, y = Total_detections, color = Class)) +
+  geom_point() +
+  geom_abline(slope = 1, intercept = 0, color = "black", linetype = "dashed") +
+  stat_cor(
+    method = "pearson",
+    aes(group = interaction(Model_version, Cultivar)),  # ensure facet-wise stats
+    label.x.npc = "left",
+    label.y.npc = "top",
+    size = 3.5,
+    color = "black",
+    parse = FALSE  # set only here, outside aes()
+  ) +
+  facet_wrap(Model_version ~ Cultivar) +
+  labs(
+    title = "Ground Truth vs. Predicted Detections (Pearson's R)",
+    x = "Ground Truth",
+    y = "Computer Vision Detections"
+  ) +
+  theme_classic() +
+  scale_color_manual(values = palette)
+
+# save image
+ggsave("ground_truth_vs_predicted_split_by_cv_pgem_nug_cas.svg", width = 10, height = 10, dpi = 300)
+
+```
+## Compare ground truth vs predicted
+```{r, gt vs pred}
+# plot ground truth vs predicted
+df_leaf_assay_test_set %>%
+  dplyr::filter(Cultivar %in% c("Pacific_Gem","Cascade","Nugget")) %>%
+  ggplot(aes(x = Total_GT, y = Total_detections, color = Class)) +
+  geom_point(aes(shape = Cultivar),alpha=0.8) +
+  geom_abline(slope = 1, intercept = 0, color = "black", linetype = "dashed") +
+  geom_smooth(method = "lm", se = FALSE, alpha=0.8) +
+  stat_poly_eq(
+    aes(
+      label = paste(..eq.label.., ..rr.label.., sep = "~~~")
+    ),
+    formula = y ~ x,
+    parse = TRUE,
+    color= "black",
+  ) +
+  facet_wrap(~Model_version) +
+  labs(
+    title = "Ground Truth vs. Detections (Pacific Gem, Nugget, Cascade Fecundity Test Set)",
+    x = "Ground Truth",
+    y = "Computer Vision Detections Split by Model Version"
+  ) +
+  theme_classic() +
+  scale_color_manual(values = palette)
+
+
+# save image
+ggsave("ground_truth_vs_predicted_cas_nug_pgem_test_set_grouped.png", width = 12, height = 6, dpi = 300)
+
+# calculate mean precision and recall for each cultivar
+df_leaf_assay_test_set %>% 
+  group_by(Model_version, Cultivar, Class) %>%
+  summarize(
+    mean_precision = mean(Precision, na.rm = TRUE),
+    mean_recall = mean(Recall, na.rm = TRUE),
+    n = n()
+  ) %>%
+  ungroup()
+
+df_leaf_assay_test_set %>% 
+  group_by(Model_version, Cultivar) %>%
+  summarize(
+    mean_precision = mean(Precision, na.rm = TRUE),
+    mean_recall = mean(Recall, na.rm = TRUE),
+    sum_objects = sum(Number_objects_in_image),
+    n = n()
+  ) %>%
+  ungroup()
+
+```
+
+# Object occlusion and other host leaf test set
+
+Look at how overall precision changes with more objects.
+
+```{r, leaf test set}
+# keep only Image_Names found in all three models
+df_sub <- df2 %>%
+  group_by(Image_name) %>%
+  filter(n_distinct(Model_version) >= 3) %>%
+  ungroup()
+
+# dont want to overplot, so dropping columns for now
+# if I didn't drop the extra columns I'd have duplicate data points since its in long format (by class)
+df_sub_pre_recall_unique <- df_sub %>%
+  dplyr::select(c(Model_version,
+                  Image_name,
+                  Number_objects_in_image,
+                  Host,
+                  Cultivar,
+                  Mite_Brush_or_Leaf,
+                  Padded,
+                  Overall_Recall,
+                  Overall_Precision)) %>%
+  unique() %>%
+  filter(!Host %in% c("Apple", "Nasturtium", "Pear")) # lets leave out the unseen data for now
+
+
+# add a column "pretrained" and set all values for all models to "TRUE" (for later)
+df_sub_pre_recall_unique <- df_sub_pre_recall_unique %>%
+  mutate(Pretrained = TRUE)
+  
+# Precision for entire leaf set (seen hosts only)
+# Figure 6A, left panel
+p3 <- df_sub_pre_recall_unique %>%
+  ggplot(., aes(x = Number_objects_in_image, y = Overall_Precision)) +
+  geom_jitter(alpha = 0.5, width = 0.2, height = 0.02) +
+  geom_smooth(method = "loess") +
+  facet_grid(Model_version ~ Padded, scales = "free_x") +
+  ggtitle("Precision vs. Number of Objects in Image") +
+  xlab("Number of Ground Truth Objects") +
+  ylab("Per-Image Precision") +
+  theme_classic() + 
+  theme(
+    strip.text = element_text(size = 12),
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  )
+
+p3
+
+# Recall for entire leaf set (seen hosts only) 
+# Figure 6B, left panel
+p4<-df_sub_pre_recall_unique %>%
+  ggplot(., aes(x = Number_objects_in_image, y = Overall_Recall)) +
+  geom_jitter(alpha = 0.5, width = 0.2, height = 0.02) +
+  geom_smooth(method = "loess") +
+  facet_grid(Model_version ~ Padded, scales = "free_x") +
+  ggtitle("Recall vs. Number of Objects in Image") +
+  xlab("Number of Ground Truth Objects") +
+  ylab("Per-Image Recall") +
+  theme_classic() + 
+  theme(
+    strip.text = element_text(size = 12),
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  )
+
+p4
+
+# save
+ggsave("precision_vs_number_objects.png", width = 8, height = 6, dpi = 300)
+
+# count number of unique image_names
+df_sub_pre_recall_unique %>%
+  group_by(Model_version, Host) %>%
+  summarise(n_unique_image_names = n_distinct(Image_name), .groups = "drop") %>%
+  arrange(desc(n_unique_image_names))
+
+```
+
+## Run Spearman Correlation Tests on Precision and Recall Vs. Number of Objects
+
+**Correlation Tests (Pearson/Spearman style):** - Computes correlation (`r`) and significance (`p-value`) between number of objects and both precision and recall.\
+- Results are grouped by model version
+
+```{r, spearman correlation}
+# spearman tests for difference in precision (seen hosts only)
+df_sub_pre_recall_unique %>%
+  group_by(Model_version) %>%
+  summarize(
+    r     = cor(Number_objects_in_image, Overall_Precision, method = "pearson"),
+    p_val = cor.test(Number_objects_in_image, Overall_Precision, method = "pearson")$p.value, 
+    n_unique_image_names = n_distinct(Image_name),
+  )
+
+# spearman tests for difference in recall (seen hosts only)
+df_sub_pre_recall_unique %>%
+  group_by(Model_version) %>%
+  summarize(
+    r     = cor(Number_objects_in_image, Overall_Recall, method = "pearson"),
+    p_val = cor.test(Number_objects_in_image, Overall_Recall, method = "pearson")$p.value, 
+    n_unique_image_names = n_distinct(Image_name),
+  )
+
+```
+
+## Run Generalized Additive Models on Precision and Recall Vs. Number of Objects (S1 Fig)
+
+**Generalized Additive Models (GAMs):** - Fits non-linear models predicting **recall** and **precision** from number of objects, controlling for host and model version.\
+- Produces diagnostic summaries and effect plots for interpretation.\
+- Plots are exported as vector PDFs for publication-quality graphics (**S1 Fig**).
+
+```{r, GAM models}
+
+# drop hosts with less than 10 rows
+df_sub_pre_recall_unique %>% 
+  group_by(Model_version, Host) %>%
+  filter(n() >= 10) %>%
+  ungroup() -> df_sub_pre_recall_unique_dropped_host_below_10
+
+# # Generalized Additive Model (GAM) with response overall recall, fixed effects for host and model version, smooth term num of objects (nonlinear effect of object count)
+gam1 <- gam(Overall_Recall ~ s(Number_objects_in_image) + Host + Model_version, data = df_sub_pre_recall_unique_dropped_host_below_10)
+summary(gam1)
+plot(gam1, select = 1)
+
+# Save GAM plot as PDF (vector graphic)
+pdf("gam_plot_recall.pdf", width = 5, height = 4)  # size in inches
+plot(gam1, select = 1)
+dev.off()
+
+# Generalized Additive Model (GAM) with response overall precision, fixed effects for host and model version, smooth term num of objects (nonlinear effect of object count)
+gam2 <- gam(Overall_Precision ~ s(Number_objects_in_image) + Host + Model_version, data = df_sub_pre_recall_unique_dropped_host_below_10)
+summary(gam2)
+plot(gam2, select = 1)
+
+# Save GAM plot as PDF (vector graphic)
+pdf("gam_plot_precision.pdf", width = 5, height = 4)  # size in inches
+plot(gam2, select = 1)
+dev.off()
+
+# check host counts for consistency
+df_sub_pre_recall_unique_dropped_host_below_10 %>%
+  dplyr::filter(Model_version == 209) %>%
+  group_by(Model_version, Host) %>%
+  summarise(n_unique_image_names = n_distinct(Image_name), .groups = "drop") %>%
+  arrange(desc(n_unique_image_names))
+
+```
+
+## Looking at precision and recall by host
+
+```{r, comparing hosts}
+# group by model, and host and find mean overall precision 
+df_sub_pre_recall_unique_dropped_host_below_10 <- df_sub_pre_recall_unique_dropped_host_below_10 %>%
+  group_by(Model_version, Host, Mite_Brush_or_Leaf) %>%
+  mutate(
+    Mean_overall_Precision = mean(Overall_Precision, na.rm = TRUE),
+    Mean_overall_Recall = mean(Overall_Recall, na.rm = TRUE)) %>%
+  ungroup()
+
+# Precompute counts
+host_counts <- df_sub_pre_recall_unique_dropped_host_below_10 %>%
+  group_by(Host, Model_version) %>%
+  summarise(n = n(), .groups = "drop")
+
+# Merge counts into main dataframe
+df_labeled <- df_sub_pre_recall_unique_dropped_host_below_10 %>%
+  left_join(host_counts, by = c("Host", "Model_version"))
+
+# order hosts by mean recall (makes for prettier boxplots)
+df_labeled <- df_labeled %>%
+  group_by(Host, Model_version) %>%
+  mutate(
+    Mean_overall_Recall = mean(Overall_Recall, na.rm = TRUE),
+    Host_reordered = fct_reorder(Host, Mean_overall_Recall)
+  ) %>%
+  ungroup()
+
+# create a new df for dynamic labels in ggplot
+df_precision_labels <- df_labeled %>%
+  group_by(Host, Model_version, Padded) %>%
+  summarise(
+    min_precision = min(Overall_Precision, na.rm = TRUE),
+    n = n(),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    y_label = pmax(0, min_precision - 0.2),
+    Host_reordered = fct_reorder(Host, min_precision)  # or use mean if preferred
+  )
+
+# Add Host_reordered to main data
+df_labeled <- df_labeled %>%
+  mutate(Host_reordered = fct_reorder(Host, Mean_overall_Precision))
+
+# count unique file names per model_version
+df_labeled_unique <- df_labeled %>%
+  distinct(Model_version, Image_name, Padded, .keep_all = TRUE)
+
+# Final precision plot
+ggplot(df_labeled_unique, aes(x = Host_reordered, y = Overall_Precision)) +
+  geom_boxplot() +
+  geom_jitter(aes(fill = Host), alpha = 0.5, width = 0.2, height = 0.02, shape=21) +
+  geom_text(
+    data = df_precision_labels,
+    aes(x = Host_reordered, y = y_label, label = paste0("n = ", n)),
+    inherit.aes = FALSE,
+    size = 3
+  ) +
+  coord_flip() +
+  facet_wrap(~Model_version) +
+  ylim(0, 1.05) +
+  theme_classic() +
+  ggtitle("Precision by Host") +
+  ylab("Precision") +
+  xlab("Host") +
+  theme(legend.position = "none") +
+  scale_fill_viridis_d()
+
+# save last plot
+#ggsave("precision_by_host_boxplot.png", width = 8, height = 4, dpi = 300)
+
+# Ensure Host_reordered is in the label data
+df_labels <- df_labeled %>%
+  group_by(Host, Model_version, Host_reordered) %>%
+  summarise(
+    min_recall = min(Overall_Recall),
+    n = n(),
+    .groups = "drop"
+  ) %>%
+  mutate(label_y = pmax(0, min_recall - 0.125))
+
+# Plot with dynamic label placement
+ggplot(df_labeled, aes(x = fct_reorder(Host, Overall_Recall), y = Overall_Recall)) +
+  geom_boxplot() +
+geom_jitter(aes(fill = Host), 
+            position = position_jitterdodge(jitter.width = 0.5, dodge.width = 0.75), 
+            alpha = 0.5,
+            shape=21) +
+  geom_text(
+    data = df_labels,
+    aes(x = Host_reordered, y = label_y, label = paste0("n = ", n)),
+    inherit.aes = FALSE,
+    size = 3
+  ) +
+  coord_flip() +
+  facet_grid(Padded~Model_version) +
+  ylim(0, 1) +
+  theme_classic() +
+  ggtitle("Recall by Host") +
+  ylab("Recall") +
+  theme(
+    legend.position = "none",
+    axis.title.y = element_blank()
+  )+
+  scale_fill_viridis_d()
+
+# save
+ggsave("recall_by_host_boxplot.svg", width = 7, height = 4, dpi = 300)
+
+# rough model comparison for precision
+ggplot(df_sub_pre_recall_unique, aes(x = factor(Model_version), y = Overall_Precision)) +
+  geom_boxplot() +
+  geom_jitter(aes(fill = "black"), position = position_jitterdodge(jitter.width = 0.2)) +
+  ggtitle("Precision by Model Version") +
+  theme_classic() +
+  theme(legend.position = "none")
+
+# rough model comparison for recall
+ggplot(df_sub_pre_recall_unique, aes(x = factor(Model_version), y = Overall_Recall)) +
+  geom_boxplot() +
+  geom_jitter(aes(fill = "black"), position = position_jitterdodge(jitter.width = 0.2)) +
+  ggtitle("Recall by Model Version") +
+  theme_classic() +
+  theme(legend.position = "none")
+
+```
+
+## Performance across hop cultivars
+
+```{r, hop cultivars}
+# Optional: filter to hop-related cultivar if necessary
+df_hop <- df_sub_pre_recall_unique %>%
+  dplyr::filter(Host == "Hop") %>%
+  na.omit(Cultivar) %>%
+  group_by(Cultivar) %>%
+  # only keep data that have 4 or more unique file names 
+  filter(n_distinct(Image_name) >= 10) %>%
+  ungroup
+
+ggplot(df_hop, aes(x = fct_reorder(Cultivar, Overall_Precision), y = Overall_Precision)) +
+  geom_boxplot() +
+  geom_jitter(aes(fill = "black"), position = position_jitterdodge(jitter.width = 0.2), alpha=0.5) +
+  coord_flip() +
+  facet_wrap(~Model_version)+
+  ggtitle("Precision by Hop Cultivar") +
+  theme_classic() +
+  ylim(0,1)+
+  theme(
+    legend.position = "none")
+
+
+ggplot(df_hop, aes(x = fct_reorder(Cultivar, Overall_Recall), y = Overall_Recall)) +
+  geom_boxplot() +
+  geom_jitter(aes(fill = "black"), position = position_jitterdodge(jitter.width = 0.2), alpha=0.5) +
+  facet_wrap(~Model_version) +
+  coord_flip() +
+  ggtitle("Recall by Hop Cultivar") +
+  theme_classic() +
+  ylim(0,1)+
+  theme(
+    legend.position = "none")
+
+  
+# print number of unique filenames for each cultivar
+unique_filenames <- df_hop %>%
+  group_by(Cultivar) %>%
+  summarize(unique_filenames = n_distinct(Image_name))
+
+unique_filenames
+
+gam3 <- gam(Overall_Recall ~ s(Number_objects_in_image) + Cultivar + Model_version, data = df_hop)
+summary(gam3)
+
+gam4 <- gam(Overall_Precision ~ s(Number_objects_in_image) + Cultivar + Model_version, data = df_hop)
+summary(gam4)
+
+```
+## Run correlation analysis on hop test images
+
+```{r, hop gt performance correlations}
+# Filter for only 'Hop' host
+hop_data <- df2 %>%
+  filter(Host == "Hop")
+
+# print number of hop images in each model version
+hop_data %>%
+  group_by(Model_version) %>%
+  summarise(n_images = n_distinct(Image_name))
+
+# only keep images that are in all three model_versions
+hop_data <- hop_data %>%
+  group_by(Image_name) %>%
+  filter(n_distinct(Model_version) >= 3) %>%
+  ungroup()
+
+# Group by Model_version and calculate correlations
+cor_results <- hop_data %>%
+  group_by(Model_version) %>%
+  summarise(
+    spearman_rho = cor(Total_GT, Total_detections, method = "spearman", use = "complete.obs"),
+    pearson_r = cor(Total_GT, Total_detections, method = "pearson", use = "complete.obs"),
+    .groups = "drop"
+  )
+
+print(cor_results)
+
+ggplot(hop_data, aes(x = Total_GT, y = Total_detections)) +
+  geom_point(alpha = 0.6) +
+  geom_smooth(method = "lm", se = FALSE, color = "blue", linetype = "dashed") +
+  stat_cor(method = "pearson", label.x = 1, label.y = max(hop_data$Total_detections, na.rm = TRUE), 
+           aes(label = paste0("Pearsons: ", ..r..)), size = 3.5) +
+  facet_wrap(~ Model_version) +
+  theme_classic() +
+  labs(
+    title = "Ground Truth vs. Predicted Detections by Model Version",
+    x = "Total Ground Truth Objects",
+    y = "Total Predicted Detections"
+  )
+
+ggsave("ground_truth_vs_predicted_hop_test_images.png", width = 8, height = 6, dpi = 300)
+```
+
+
+## Pie chart looking at images in dataset
+
+This includes all images -- including those not used in training (or even testing).
+
+```{r, metadata pie charts}
+# Data
+# This includes all images -- including those not used in training (or even testing).
+image_data <- data.frame(
+  Image_Type = c("Hop", "Bean", "Synthetic", "Mite Brush", "Strawberry", 
+                 "Tomato", "Raspberry", "Columbine", "Apple", "Nasturtium", 
+                 "Pear", "Poppy", "CNC microscope"),
+  Count = c(720, 277, 200, 189, 68, 39, 34, 31, 21, 16, 15, 10, 10)
+)
+
+# Compute percentages and labels
+image_data <- image_data %>%
+  arrange(desc(Count)) %>%
+  mutate(Percent = Count / sum(Count),
+         Label = paste0(Image_Type, "\n(", round(Percent * 100, 1), "%)"))
+
+# convert to long data for lessR piechart
+long_image_data <- image_data[rep(1:nrow(image_data), times = image_data$Count), , drop = FALSE]
+
+# group those with 1% or less into "Other" Category
+long_image_data <- long_image_data %>%
+  mutate(Image_Type = ifelse(Percent < 0.02, "Other", Image_Type))
+
+PieChart(Image_Type,
+         data = long_image_data,
+         hole = 0.5,
+         values_size = 1.5,
+         labels = "%",  
+         # label size
+         main = "Distribution of Image Types in Dataset",
+         fill = "viridis",
+         #pdf_file = "image_type_donut_chart.png",
+         width = 6.5,
+         height = 8)
+
+# Create a dataframe with your counts
+class_data <- data.frame(
+  Image_Type = c("Viable egg", "Immature", "Dead mite", "Adult female", "Adult male"),
+  Count = c(18324, 7435, 3182, 1847, 1471)
+)
+
+# Calculate total and percent
+class_data <- class_data %>%
+  mutate(Percent = Count / sum(Count))
+
+# Repeat rows to prepare for PieChart
+long_class_data <- class_data[rep(1:nrow(class_data), times = class_data$Count), , drop = FALSE]
+
+# Group categories <2% into "Other"
+long_class_data <- long_class_data %>%
+  mutate(Image_Type = ifelse(Percent < 0.02, "Other", Image_Type))
+
+# Create the donut pie chart
+PieChart(Image_Type,
+         data = long_class_data,
+         hole = 0.5,
+         values_size = 1.5,
+         labels = "%",  # This shows both raw count and percent
+         main = "Distribution of Object Classes in Annotated Dataset",
+         fill = "viridis",
+         #pdf_file = "object_class_donut_chart.pdf",
+         width = 7,
+         height = 8)
+
+```
+
+## Charts reflecting just training data
+
+```{r, training metadata visualizations}
+# --- All model data combined ---
+
+all_data <- tribble(
+  ~Model, ~Dataset, ~Class, ~Source, ~Count,
+  # v209
+  "v209", "Training", "Viable_egg", "Real", 9504,
+  "v209", "Training", "Viable_egg", "Synthetic", 105,
+  "v209", "Training", "Immature", "Real", 2726,
+  "v209", "Training", "Immature", "Synthetic", 264,
+  "v209", "Training", "Adult_female", "Real", 472,
+  "v209", "Training", "Adult_female", "Synthetic", 672,
+  "v209", "Training", "Dead_mite", "Real", 517,
+  "v209", "Training", "Dead_mite", "Synthetic", 538,
+  "v209", "Training", "Adult_male", "Real", 208,
+  "v209", "Training", "Adult_male", "Synthetic", 746,
+  "v209", "Validation", "Viable_egg", "Real", 1316,
+  "v209", "Validation", "Immature", "Real", 544,
+  "v209", "Validation", "Adult_female", "Real", 78,
+  "v209", "Validation", "Dead_mite", "Real", 116,
+  "v209", "Validation", "Adult_male", "Real", 39,
+  
+  # v210
+  "v210", "Training", "Viable_egg", "Real", 9504,
+  "v210", "Training", "Viable_egg", "Synthetic", 105,
+  "v210", "Training", "Immature", "Real", 2726,
+  "v210", "Training", "Immature", "Synthetic", 264,
+  "v210", "Training", "Adult_female", "Real", 472,
+  "v210", "Training", "Adult_female", "Synthetic", 672,
+  "v210", "Validation", "Viable_egg", "Real", 1316,
+  "v210", "Validation", "Immature", "Real", 544,
+  "v210", "Validation", "Adult_female", "Real", 78,
+  
+  # v211
+  "v211", "Training", "Viable_egg", "Real", 9504,
+  "v211", "Training", "Viable_egg", "Synthetic", 105,
+  "v211", "Training", "Immature", "Real", 2726,
+  "v211", "Training", "Immature", "Synthetic", 264,
+  "v211", "Training", "Adult_female", "Real", 472,
+  "v211", "Training", "Adult_female", "Synthetic", 672,
+  "v211", "Training", "Adult_male", "Real", 208,
+  "v211", "Training", "Adult_male", "Synthetic", 746,
+  "v211", "Validation", "Viable_egg", "Real", 1316,
+  "v211", "Validation", "Immature", "Real", 544,
+  "v211", "Validation", "Adult_female", "Real", 78,
+  "v211", "Validation", "Adult_male", "Real", 39
+)
+
+
+
+# --- Order classes by total instance count ---
+
+class_order <- all_data %>%
+  group_by(Class) %>%
+  summarise(Total = sum(Count)) %>%
+  arrange(desc(Total)) %>%
+  pull(Class)
+
+# Apply order to Class and Model
+all_data <- all_data %>%
+  mutate(
+    Class = factor(Class, levels = class_order),
+    Model = factor(Model, levels = c("v209", "v211", "v210")),
+    Dataset = factor(Dataset, levels = c("Training", "Validation"))
+  )
+
+test_data <- tribble(
+  ~Class, ~Test_Set, ~Instances,
+  "Adult_female", "Leaf Test Set", 197,
+  "Adult_male", "Leaf Test Set", 74,
+  "Dead_mite", "Leaf Test Set", 71,
+  "Immature", "Leaf Test Set", 705,
+  "Viable_egg", "Leaf Test Set", 3402,
+  "Adult_female", "Acaricide Test Set", 88,
+  "Adult_male", "Acaricide Test Set", 10,
+  "Dead_mite", "Acaricide Test Set", 97,
+  "Immature", "Acaricide Test Set", 10,
+  "Viable_egg", "Acaricide Test Set", 504,
+  "Adult_female", "Original Test Set", 62,
+  "Adult_male", "Original Test Set", 55,
+  "Dead_mite", "Original Test Set", 103,
+  "Immature", "Original Test Set", 437,
+  "Viable_egg", "Original Test Set", 1184
+) %>%
+  dplyr::rename(Source = Test_Set, Count = Instances) %>%
+  mutate(
+    Model = "v209",       # or change to "All" or NA if not model-specific
+    Dataset = "Test"
+  )
+
+# Combine test data with all_data
+combined_data <- bind_rows(all_data, test_data)
+
+add_models <- tribble(
+  ~Model, ~Dataset, ~Class, ~Source, ~Count,
+"v210","Test","Adult_female","Leaf Test Set", 197,
+"v210","Test","Immature","Leaf Test Set", 705,
+"v210","Test","Viable_egg","Leaf Test Set", 3402,
+"v211","Test","Adult_female","Leaf Test Set", 197,
+"v211","Test","Immature","Leaf Test Set", 705,
+"v211","Test","Viable_egg","Leaf Test Set", 3402,
+"v211","Test","Adult_male","Leaf Test Set", 74,
+"v211","Test","Adult_female","Acaricide Test Set", 88,
+"v211","Test","Immature","Acaricide Test Set", 10,
+"v211","Test","Viable_egg","Acaricide Test Set", 504,
+"v211","Test","Adult_male","Acaricide Test Set", 10,
+"v210","Test","Adult_female","Acaricide Test Set", 88,
+"v210","Test","Immature","Acaricide Test Set", 10,
+"v210","Test","Viable_egg","Acaricide Test Set", 504,
+"v211","Test","Adult_female","Original Test Set", 62,
+"v211","Test","Immature","Original Test Set", 437,
+"v211","Test","Viable_egg","Original Test Set", 1184,
+"v211","Test","Adult_male","Original Test Set", 55,
+"v210","Test","Adult_female","Original Test Set", 62,
+"v210","Test","Immature","Original Test Set", 437,
+"v210","Test","Viable_egg","Original Test Set", 1184)
+
+combined_data <- bind_rows(combined_data, add_models)
+
+# Reorder factors for Class and Dataset
+combined_data <- combined_data %>%
+  mutate(
+    Class = factor(Class, levels = class_order),
+    Model = factor(Model, levels = c("v209", "v211", "v210")),
+    Dataset = factor(Dataset, levels = c("Training", "Validation", "Test"))
+  )
+
+
+combined_data <- combined_data %>%
+  mutate(
+    Dataset = factor(Dataset, levels = c("Training", "Validation", "Test")),
+    Model = forcats::fct_recode(Model,
+      "V209 – Five Classes" = "v209",
+      "V211 – Four Classes" = "v211",
+      "V210 – Three Classes" = "v210"
+    ),
+    # Order Facet by Dataset, then Model
+    Facet = interaction(Model, Dataset, sep = " – "),
+    Facet = fct_reorder(Facet, as.numeric(Dataset))  # Order by Dataset level
+  )
+
+p <- ggplot(combined_data, aes(x = Class, y = Count, fill = Source)) +
+  geom_bar(stat = "identity", position = "stack", color = "black") +
+  facet_wrap(~ Facet, scales = "free_y", ncol = 3) +
+  scale_fill_manual(
+    name = "Source",
+    values = c(
+      "Real" = "#3F648A",
+      "Synthetic" = "#4DA29D",
+      "Original Test Set" = "#3F648A",
+      "Leaf Test Set" = "#F8E665",
+      "Acaricide Test Set" = "#8FCF63"
+    ),
+    breaks = c("Real", "Synthetic", "Original Test Set", "Leaf Test Set", "Acaricide Test Set"),
+    labels = c("Real (Train/Val)", "Synthetic (Train)", "Original Test Set", "Leaf Test Set", "Acaricide Test Set")
+  ) +
+  labs(
+    title = "Train, Validation, and Test Class Breakdown by Model",
+    x = "Class", y = "Instance Count"
+  ) +
+  theme_classic(base_size = 14) +
+  theme(
+    strip.background = element_rect(fill = "white", color = "black"),
+    strip.placement = "outside",
+    axis.text.x = element_text(angle = 30, hjust = 1),
+    legend.position = "bottom",
+    legend.title = element_text(face = "bold")
+  )
+
+p
+
+
+# Save
+#ggsave("model_class_breakdown_with_test.svg", p, width = 8, height = 11, dpi = 300)
+
+
+```
+
+## Unseen host performance evaluation
+
+```{r, unseen host evaluation}
+# keep only Image_Names found in all three models
+df_sub <- df2 %>%
+  group_by(Image_name) %>%
+  filter(Padded=="FALSE")%>%
+  ungroup()
+
+# dont want to overplot, so dropping columns for now
+df_sub_pre_recall_unique_unseen_hosts <- df_sub %>%
+  dplyr::select(c(Model_version,
+                  Image_name,
+                  Number_objects_in_image,
+                  Host,
+                  Cultivar,
+                  Mite_Brush_or_Leaf,
+                  Overall_Recall,
+                  Overall_Precision)) %>%
+  unique() %>%
+  filter(Host %in% c("Apple", "Nasturtium", "Pear"))
+
+# Precision for entire leaf set (unseen hosts only)
+df_sub_pre_recall_unique_unseen_hosts %>%
+  ggplot(., aes(x = Number_objects_in_image, y = Overall_Precision)) +
+  geom_jitter(alpha = 0.5, width = 0.2, height = 0.02) +
+  geom_smooth(method = "loess") +
+  facet_grid(Model_version ~ Mite_Brush_or_Leaf, scales = "free_x") +
+  ggtitle("Precision vs. Number of Objects in Image (Unseen Hosts)") +
+  xlab("Number of Ground Truth Objects") +
+  ylab("Per-Image Precision") +
+  theme_classic() + 
+  theme(
+    strip.text = element_text(size = 12),
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  )
+
+# Recall for entire leaf set (unseen hosts only)
+df_sub_pre_recall_unique_unseen_hosts %>%
+  ggplot(., aes(x = Number_objects_in_image, y = Overall_Recall)) +
+  geom_jitter(alpha = 0.5, width = 0.2, height = 0.02) +
+  geom_smooth(method = "loess") +
+  facet_grid(Model_version ~ Mite_Brush_or_Leaf, scales = "free_x") +
+  ggtitle("Recall vs. Number of Objects in Image (All Seen Hosts (n=188))") +
+  xlab("Number of Ground Truth Objects") +
+  ylab("Per-Image Recall") +
+  theme_classic() + 
+  theme(
+    strip.text = element_text(size = 12),
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  )
+
+# Ensure Host_reordered is in the label data
+df_labels <- df_sub_pre_recall_unique_unseen_hosts %>%
+  group_by(Host, Model_version) %>%
+  summarise(
+    min_recall = min(Overall_Recall),
+    n = n(),
+    .groups = "drop"
+  ) %>%
+  mutate(label_y = pmax(0, min_recall - 0.125))
+
+
+# Recall
+ggplot(df_sub_pre_recall_unique_unseen_hosts, aes(x = fct_reorder(Host, Overall_Recall), y = Overall_Recall)) +
+  geom_boxplot() +
+geom_jitter(aes(fill = Host), 
+            position = position_jitterdodge(jitter.width = 0.5, dodge.width = 0.75), 
+            alpha = 0.5,
+            shape=21) +
+  geom_text(
+    data = df_labels,
+    aes(x = Host, y = label_y, label = paste0("n = ", n)),
+    inherit.aes = FALSE,
+    size = 3
+  ) +
+  coord_flip() +
+  facet_wrap(~Model_version) +
+  ylim(0, 1) +
+  theme_classic() +
+  ggtitle("Recall by Host") +
+  ylab("Recall") +
+  theme(
+    legend.position = "none",
+    axis.title.y = element_blank()
+  )+
+  scale_fill_viridis_d()
+
+# Precision
+ggplot(df_sub_pre_recall_unique_unseen_hosts, aes(x = fct_reorder(Host, Overall_Precision), y = Overall_Precision)) +
+  geom_boxplot() +
+geom_jitter(aes(fill = Host), 
+            position = position_jitterdodge(jitter.width = 0.5, dodge.width = 0.75), 
+            alpha = 0.5,
+            shape=21) +
+  geom_text(
+    data = df_labels,
+    aes(x = Host, y = label_y, label = paste0("n = ", n)),
+    inherit.aes = FALSE,
+    size = 3
+  ) +
+  coord_flip() +
+  facet_wrap(~Model_version) +
+  ylim(0, 1) +
+  theme_classic() +
+  ggtitle("Precision by Host") +
+  ylab("Precision") +
+  theme(
+    legend.position = "none",
+    axis.title.y = element_blank()
+  )+
+  scale_fill_viridis_d()
+
+
+# Make long
+df_long <- df_sub_pre_recall_unique_unseen_hosts %>%
+  pivot_longer(cols = c(Overall_Recall, Overall_Precision),
+               names_to = "Metric",
+               values_to = "Value") %>%
+  mutate(Metric = dplyr::recode(Metric,
+                         Overall_Recall = "Recall",
+                         Overall_Precision = "Precision"))
+
+# define color-blind friendly palette (for accessibilty and consistency)
+pal2 <- c("#4E4B80","#4CA09C")
+
+# Per-Image Precision and Recall Boxplots for Nasturtium, Apple, and Pear
+ggplot(df_long, aes(x = fct_reorder(Host, Value), y = Value, fill = Metric)) +
+  geom_boxplot(position = position_dodge(width = 0.75), outlier.shape = NA) +
+  geom_jitter(position = position_jitterdodge(jitter.width = 0.2, dodge.width = 0.75),
+              shape = 21, alpha = 0.5) +
+  #geom_text(
+  #  data = df_labels,  # Make sure this is compatible with new data structure or adjust accordingly
+  #  aes(x = Host, y = label_y, label = paste0("n = ", n)),
+  #  inherit.aes = FALSE,
+  #  size = 3
+  #) +
+  coord_flip() +
+  facet_wrap(~Model_version) +
+  ylim(0, 1) +
+  theme_classic() +
+  ggtitle("Per-Image Precision and Recall by For Unseen Hosts") +
+  ylab("Value") +
+  theme(
+    axis.title.y = element_blank()
+  ) +
+  scale_fill_manual(values = pal2)
+
+# save
+#ggsave("precision_recall_on_unseen_hosts_dodged.svg", width = 6, height = 6, dpi = 300)
+
+
+# add a column called "pretrained" and set all values in this dataset to no
+df_sub_pre_recall_unique_unseen_hosts <- df_sub_pre_recall_unique_unseen_hosts %>%
+  mutate(pretrained = "FALSE")
+
+# concat rows for df_sub_pre_recall_unique_unseen_hosts and df_sub_pre_recall_unique
+df_sub_pre_recall_unique_combined <- bind_rows(
+  df_sub_pre_recall_unique_unseen_hosts,
+  df_sub_pre_recall_unique
+)
+
+# Pivot long by recall or precision value
+df_long_all <- df_sub_pre_recall_unique_combined %>%
+  pivot_longer(cols = c(Overall_Recall, Overall_Precision),
+               names_to = "Metric",
+               values_to = "Value") %>%
+  mutate(Metric = dplyr::recode(Metric,
+                         Overall_Recall = "Recall",
+                         Overall_Precision = "Precision"))
+
+# replace NA in Pretrained column with "FALSE"
+df_long_all <- df_long_all %>%
+  mutate(Pretrained = ifelse(is.na(Pretrained), "FALSE", Pretrained)) %>%
+  dplyr::select(!(pretrained))
+
+# df that sums unseen and seen hosts in boxplot
+df_labels_seen_unseen <- df_long_all %>%
+  dplyr::filter(Metric == "Recall") %>%
+  group_by(Pretrained, Model_version) %>%
+  summarise(
+    min_value = min(Value),
+    n = n(),
+    .groups = "drop"
+  ) %>%
+  mutate(label_y = pmax(0, min_value - 0.125))
+
+# plot by host
+df_long_all %>%
+  dplyr::filter(!Host %in% c("Poppy","Columbine")) %>%
+  ggplot(aes(x = fct_reorder(Host, Value), y = Value, fill = Metric)) +
+                  geom_boxplot(position = position_dodge(width = 0.75), outlier.shape = NA) +
+                  geom_jitter(position = position_jitterdodge(jitter.width = 0.1, dodge.width = 0.75),
+                              shape = 21, alpha = 0.5) +
+                  coord_flip() +
+                  facet_wrap(~Model_version) +
+                  ylim(0, 1) +
+                  theme_classic() +
+                  ggtitle("Per-Image Precision and Recall by For Unseen Hosts") +
+                  ylab("Value") +
+                  theme(
+                    axis.title.y = element_blank()) +
+  scale_fill_manual(values = pal2)
+
+
+# grouped
+df_long_all %>%
+  dplyr::filter(!Host %in% c("Poppy","Columbine")) %>%
+                  ggplot(aes(x = fct_reorder(Pretrained, Value), y = Value, fill = Metric)) +
+                  geom_boxplot(position = position_dodge(width = 0.75), outlier.shape = NA) +
+                  geom_jitter(position = position_jitterdodge(jitter.width = 0.2, dodge.width = 0.75),
+                              shape = 21, alpha = 0.5) +
+                  coord_flip() +
+                  facet_wrap(~Model_version) +
+                  ylim(0, 1) +
+                  theme_classic() +
+                  ggtitle("Per-Image Precision and Recall Comparing Seen and Unseen Hosts") +
+                  ylab("Value") +
+                  theme(
+                    axis.title.y = element_blank()) +
+    scale_fill_manual(values = pal2)
+
+# save
+#ggsave("precision_recall_by_host_unseen_hosts.png", width = 8, height = 6, dpi = 300)
+
+# Filter only precision data
+df_precision <- df_long_all %>%
+  filter(Metric == "Precision", !Host %in% c("Poppy", "Columbine"))
+
+# Convert Pretrained to factor
+df_precision$Pretrained <- as.factor(df_precision$Pretrained)
+
+# Run linear model
+lm_test <- lm(Value ~ Pretrained, data = df_precision)
+summary(lm_test)
+
+df_recall <- df_long_all %>%
+  filter(Metric == "Recall", !Host %in% c("Poppy", "Columbine"))
+
+# Convert Pretrained to factor
+df_recall$Pretrained <- as.factor(df_recall$Pretrained)
+
+# Run linear model
+lm_test_recall <- lm(Value ~ Pretrained, data = df_recall)
+summary(lm_test_recall)
+
+# precision
+wilcox.test(
+  Value ~ Pretrained,
+  data = df_precision
+)
+
+# precision
+wilcox.test(
+  Value ~ Pretrained,
+  data = df_recall
+)
+
+# Visual check
+plot(lm_test_recall)
+plot(lm_test)
+# Formal test for normality
+shapiro.test(residuals(lm_test_recall))
+shapiro.test(residuals(lm_test))
+
+# sum median for each host model combination
+median_perform<- df_long_all %>%
+  group_by(Host, Model_version, Metric) %>%
+  summarise(Median_Value = median(Value, na.rm = TRUE), .groups = "drop") %>%
+  arrange(desc(Median_Value)) %>%
+  print(n = Inf)
+
+```
+
+# Miticidal data
+
+## Tidy and summarize data
+
+```{r, tidy and summarize}
+
+floramite_data <- df3 %>%
+  mutate(
+    # Extract number right before 'ppm' (e.g., 3_125 from "307-3_125ppm")
+    ppm_raw = str_extract(Image_name, "\\d+_?\\d*(?=ppm)"),
+    ppm = as.numeric(str_replace(ppm_raw, "_", "."))
+  ) %>%
+  #drop ppm_raw
+  dplyr::select(-ppm_raw)
+
+# fill NA in ppm row with "0"
+floramite_data <- floramite_data %>%
+  mutate(ppm = ifelse(is.na(ppm), 0, ppm))
+  
+# Summarize total detections by disk and class
+summary_floramite <- floramite_data %>%
+  group_by(Image_name, ppm, Class, Confidence_threshold) %>%
+  summarise(
+    cv_detections = sum(Total_detections),
+    gt_detections = sum(Total_GT),
+    .groups = "drop"
+  )
+
+# Pivot cv_detections
+cv_wide <- summary_floramite %>%
+  dplyr::select(Image_name, ppm, Confidence_threshold, Class, cv_detections) %>%
+  pivot_wider(names_from = Class, values_from = cv_detections, values_fill = 0, names_prefix = "cv_")
+
+# Pivot gt_detections
+gt_wide <- summary_floramite %>%
+  dplyr::select(Image_name, ppm, Confidence_threshold, Class, gt_detections) %>%
+  pivot_wider(names_from = Class, values_from = gt_detections, values_fill = 0, names_prefix = "gt_")
+
+# Merge both wide tables
+wide_df <- left_join(cv_wide, gt_wide,
+                     by = c("Image_name", "ppm", "Confidence_threshold")) %>%
+  mutate(
+    cv_total_mite = cv_Adult_female + cv_Adult_male + cv_Immature + cv_Dead_mite,
+    gt_total_mite = gt_Adult_female + gt_Adult_male + gt_Immature + gt_Dead_mite,
+    
+    cv_mortality = cv_Dead_mite / cv_total_mite,
+    gt_mortality = gt_Dead_mite / gt_total_mite,
+    
+    cv_fecundity = cv_Viable_egg / cv_Adult_female,
+    gt_fecundity = gt_Viable_egg / gt_Adult_female
+  )
+
+wide_df <- wide_df %>%
+  dplyr::mutate(cv_fecundity = ifelse(cv_Adult_female > 0,
+                               cv_Viable_egg / cv_Adult_female,
+                               NA)) %>%
+  dplyr::filter(Confidence_threshold == "0.2")
+
+```
+
+## Fit miticide GLMs
+
+```{r, glm miticide data}
+
+# GLM for model-predicted mortality (cv)
+mortality_model_cv <- glm(
+  cbind(cv_Dead_mite, cv_Adult_female) ~ log1p(ppm),
+  data = wide_df,
+  family = binomial
+)
+
+summary(mortality_model_cv)
+
+# GLM for human-labeled mortality (gt)
+mortality_model_gt <- glm(cbind(gt_Dead_mite, gt_Adult_female) ~ log1p(ppm), 
+                          data = wide_df, family = binomial)
+summary(mortality_model_gt)
+
+```
+
+Both models show highly significant effects of increasing bifenazate on mite mortality.
+
+The manual annotations (gt) model has a:
+
+-   Slightly higher slope: greater sensitivity to ppm
+-   Better fit: lower residual deviance and AIC
+-   The model-predicted (cv) output still closely mirrors this trend, which supports the validity of your detection pipeline.
+
+So, the detection model slightly underestimates the sensitivity, but trends are consistent.
+
+## LC50
+
+```{r, lc50 calculations}
+# LC50 for model-predicted mortality
+lc50_cv_fixed <- drm(
+  cv_Dead_mite / cv_total_mite ~ ppm,
+  weights = cv_total_mite,
+  data = wide_df,
+  fct = LL.4(fixed = c(NA, 0, 1, NA))  # fix c=0, d=1
+)
+
+summary(lc50_cv_fixed)
+
+
+ED(lc50_cv_fixed, 50, interval = "delta")  # LC50 ± CI
+plot(lc50_cv_fixed, xlab = "Bifenazate (ppm)", ylab = "Model-predicted mortality")
+
+# LC50 for ground-truth mortality
+lc50_gt_fixed <- drm(gt_Dead_mite / gt_total_mite ~ ppm,
+               weights = gt_total_mite,
+               data = wide_df,
+               fct = LL.4(fixed = c(NA, 0, 1, NA))  # fix c=0, d=1
+)
+
+summary(lc50_gt_fixed)
+
+ED(lc50_gt_fixed, 50, interval = "delta")
+plot(lc50_gt_fixed, xlab = "Bifenazate (ppm)", ylab = "Manual mortality")
+
+
+```
+
+## Overlay LC50 curves
+
+```{r, lc50 curves}
+# Step 1: Create common x values (dose range)
+dose_range <- exp(seq(log(1), log(max(wide_df$ppm, na.rm = TRUE)), length.out = 100))
+
+# Step 2: Get predictions for both models
+pred_cv <- predict(lc50_cv_fixed, newdata = data.frame(ppm = dose_range))
+pred_gt <- predict(lc50_gt_fixed, newdata = data.frame(ppm = dose_range))
+
+# Step 3: Plot manual mortality
+plot(dose_range, pred_gt, type = "l", lwd = 2, col = "#4E4B80",
+     log = "x", ylim = c(0, 1),
+     xlab = "Bifenazate (ppm, log scale)",
+     ylab = "Mortality Rate",
+     main = "Dose–Response: Manual vs Model Mortality")
+
+# Step 4: Add model-predicted mortality
+lines(dose_range, pred_cv, col = "#4CA09C", lwd = 2, lty = 1)
+
+#put a line at 0.5 for LC50
+abline(h = 0.5, col = "gray", lty = 2)
+
+# Step 5: Add legend
+legend("bottomright", legend = c("Manual (gt)", "Model (cv)"),
+       col = c("#4E4B80", "#4CA09C"), lwd = 2, lty = c(1, 1))
+```
+
+## Miticide assay fecundity assessment
+
+```{r, miticidal assay fecund assessment}
+# Check distributions
+wide_df <- wide_df %>%
+  dplyr::mutate(gt_fecundity = ifelse(gt_Adult_female > 0,
+                                gt_Viable_egg / gt_Adult_female,
+                                NA))
+
+hist(wide_df$cv_fecundity, main = "Model fecundity", col = "#4CA09C")
+hist(wide_df$gt_fecundity, main = "Manual fecundity", col = "#4E4B80")
+
+# check for overdispersion
+mean_fec <- mean(wide_df$cv_fecundity, na.rm = TRUE)
+var_fec <- var(wide_df$cv_fecundity, na.rm = TRUE)
+overdispersion_ratio <- var_fec / mean_fec
+overdispersion_ratio 
+
+# we have overdispersion and non-normal distribution. since we're using count data, let's go with a negative binomial 
+# computer vision model
+cv_nb_model <- glm.nb(
+  cv_Viable_egg ~ log1p(ppm) + offset(log(cv_Adult_female + 1)),
+  data = wide_df %>% filter(!is.na(cv_Viable_egg))
+)
+summary(cv_nb_model)
+
+# ground truth model
+gt_nb_model <- glm.nb(
+  gt_Viable_egg ~ log1p(ppm) + offset(log(gt_Adult_female + 1)),
+  data = wide_df %>% filter(!is.na(gt_Viable_egg))
+)
+summary(gt_nb_model)
+
+
+ggplot(wide_df, aes(x = ppm, y = cv_fecundity)) +
+  geom_point(alpha = 0.5) +
+  stat_smooth(method = "glm.nb", formula = y ~ log1p(x), se = TRUE, color = "darkgreen") +
+  scale_x_log10() +
+  labs(title = "Fecundity with Negative Binomial Fit",
+       x = "Bifenazate (ppm, log scale)",
+       y = "Fecundity (eggs per female)") +
+  theme_classic()
+
+# Create new data for prediction
+new_data <- data.frame(ppm = seq(0, max(wide_df$ppm, na.rm = TRUE), length.out = 100),
+                       cv_Adult_female = 1)  # to neutralize offset
+
+# Predict expected viable eggs per female
+new_data$pred <- predict(cv_nb_model, newdata = new_data, type = "response")
+
+# Plot
+ggplot(wide_df, aes(x = ppm, y = cv_fecundity)) +
+  geom_point(alpha = 0.4) +
+  geom_line(data = new_data, aes(x = ppm, y = pred), color = "blue", size = 1.2) +
+  labs(
+    title = "Predicted model-detected fecundity vs. Bifenazate ppm",
+    y = "Viable eggs per female (cv)",
+    x = "ppm"
+  ) +
+  theme_classic()
+
+
+
+```
+
+## Miticide publication-ish figures
+
+```{r, more miticide figures}
+# Melt the wide_df for gt and cv class counts
+class_summary <- wide_df %>%
+  dplyr::select(ppm, starts_with("gt_"), starts_with("cv_")) %>%
+  pivot_longer(
+    cols = -ppm,
+    names_to = c("source", "class"),
+    names_pattern = "(gt|cv)_(.*)",
+    values_to = "count"
+  )
+
+# Summarize across replicates
+class_summary_agg <- class_summary %>%
+  group_by(ppm, source, class) %>%
+  summarise(total = sum(count, na.rm = TRUE), .groups = "drop")
+
+# Plot
+ggplot(class_summary_agg, aes(x = factor(ppm), y = total, fill = source)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  facet_wrap(~class, scales = "free_y") +
+  labs(x = "Bifenazate (ppm)", y = "Total Count", title = "Class Detections by Source and Dose") +
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+lc50_pal <- c("#3F648A","#4DA29D")
+
+# Enhanced LC50 overlay plot
+ggplot(data = data.frame(ppm = dose_range), aes(x = ppm)) +
+  geom_line(aes(y = pred_gt, color = "Manual (GT)"), size = 1.2) +
+  geom_line(aes(y = pred_cv, color = "Model (CV)"), size = 1.2) +
+  geom_hline(yintercept = 0.5, linetype = "dotted", color = "gray") +
+  scale_x_log10() +
+  labs(
+    title = "Dose-Response Curves for Mortality (Manual vs. Model)",
+    x = "Bifenazate (ppm, log scale)",
+    y = "Mortality Rate",
+    color = "Source"
+  ) +
+  theme_classic()+
+  scale_color_manual(values = lc50_pal)
+
+#save
+ggsave("lc50_overlay_plot.pdf", width = 8, height = 6, dpi = 300)
+
+
+# Prediction data frame
+new_pred_data <- data.frame(ppm = seq(0, max(wide_df$ppm, na.rm = TRUE), length.out = 100),
+                            cv_Adult_female = 1,
+                            gt_Adult_female = 1)
+
+new_pred_data$cv_pred <- predict(cv_nb_model, newdata = new_pred_data, type = "response")
+new_pred_data$gt_pred <- predict(gt_nb_model, newdata = new_pred_data, type = "response")
+
+# Plot both fecundity curves
+ggplot(wide_df, aes(x = ppm)) +
+  geom_point(aes(y = cv_fecundity), alpha = 0.4, color = "#3F648A") +
+  geom_point(aes(y = gt_fecundity), alpha = 0.4, color = "#4DA29D") +
+  geom_line(data = new_pred_data, aes(y = cv_pred), color = "#3F648A", size = 1.2) +
+  geom_line(data = new_pred_data, aes(y = gt_pred), color = "#4DA29D", size = 1.2) +
+  labs(
+    title = "Fecundity Decline with Bifenazate Dose",
+    x = "Bifenazate (ppm)",
+    y = "Viable Eggs per Female"  ) +
+  scale_x_log10() +
+  theme_classic()
+
+ggsave("fecund_acaricide_overlay_plot.pdf", width = 8, height = 6, dpi = 300)
+
+```
