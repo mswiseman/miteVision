@@ -32,12 +32,12 @@ YOLOv11 comes with a built in validation function, but we wanted to extract more
 
 The `inference_testing.py` has a number of built-in extended ground truth validation metrics in addition to expanded arg-parse commands including: 
 
-- per-image performance metrics (IoU, recall, precision) 
-- missed detection mapping
-- ground truth and inference bounding boxes overlaid onto evaluated image
+- per-image performance metrics (IoU, recall, precision)
+- ground truth and inference bounding boxes overlaid onto evaluated image (**A** below)
+- missed detection mapping (**B** below)
 - edge detection evaluation
 
-![example of custom inference testing outputs](/assets/images/inference_testing_outputs.jpg)
+![example of custom inference testing outputs](/assets/images/example_outputs.png)
 
 # Contact
 Michele Wiseman:
