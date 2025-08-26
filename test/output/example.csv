@@ -1,0 +1,6 @@
+Model_version,Image_name,Date_subdirectory,DPI,Class,Total_detections,Confidence_threshold,Total_GT,Missed_GT,Average_IoU,Number_objects_in_image,Precision,Recall,Overall_Precision,Overall_Recall
+209,3-18-2025_6dpi_009-Early_Choice.jpg,Unknown,,Adult_female,1,0.5,1,0,0.929,56,1.000,1.000,0.982,0.982
+209,3-18-2025_6dpi_009-Early_Choice.jpg,Unknown,,Viable_egg,48,0.5,47,0,0.923,56,0.979,1.000,0.982,0.982
+209,3-18-2025_6dpi_009-Early_Choice.jpg,Unknown,,Immature,7,0.5,8,1,0.728,56,1.000,0.875,0.982,0.982
+209,011-onager_007_rep1.jpg,Unknown,,Viable_egg,18,0.5,18,0,0.837,19,1.000,1.000,1.000,1.000
+209,011-onager_007_rep1.jpg,Unknown,,Immature,1,0.5,1,0,0.821,19,1.000,1.000,1.000,1.000
