@@ -27,7 +27,7 @@ scipy>=1.10
 ```
 
 ## Example of file layout
-To successfully run ground truth evaluation, the files should be in the standard YOLO format (./test/images and ./test/labels) like so: 
+To successfully run ground truth evaluation, the files should be in the standard YOLO format (`./test/images` and `./test/labels`) like so: 
 
 ```bash
 
