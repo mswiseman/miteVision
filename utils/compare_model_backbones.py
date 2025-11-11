@@ -16,6 +16,7 @@ import torchvision
 from torchvision.transforms.functional import to_tensor
 from torch.utils.data import Dataset, DataLoader
 
+# Optional but recommended for proper COCO mAP
 try:
     from pycocotools.coco import COCO
     from pycocotools.cocoeval import COCOeval
@@ -81,7 +82,7 @@ def yolo_txt_to_xyxy(label_path: Path, img_w: int, img_h: int) -> Tuple[np.ndarr
 
 class YOLODetectionDataset(Dataset):
     """
-    Minimal dataset to feed Faster R-CNN using YOLO-format labels.
+    Minimal dataset to feed Torchvision detectors using YOLO-format labels.
     """
     def __init__(self, images_dir: str):
         self.images = []
@@ -118,7 +119,7 @@ class YOLODetectionDataset(Dataset):
             "size": torch.as_tensor([h, w], dtype=torch.int64),
         }
 
-        # Basic transforms: convert to tensor, do not resize (Faster R-CNN handles internally)
+        # Basic transforms: convert to tensor, do not resize (most detectors handle internally)
         img_tensor = to_tensor(img)
         return img_tensor, target
 
@@ -138,6 +139,7 @@ def coco_eval_from_results(cocoGt, results):
     return {
         "mAP50-95": float(stats[0]),
         "mAP50": float(stats[1]),
+        "AP_small": float(stats[3]),
     }
 
 
@@ -161,9 +163,7 @@ def to_coco_json(det_outputs, dataset: YOLODetectionDataset, class_map: Dict[int
                 "bbox": [float(x1), float(y1), float(w), float(h)],
                 "score": float(s),
             })
-    categories = [{"id": i, "name": class_map[i]} for i in sorted(class_map)]
-    # Build COCO-style GT to evaluate properly
-    # For convenience we will write a minimal COCO GT file from the YOLO dataset on-the-fly.
+    _ = [{"id": i, "name": class_map[i]} for i in sorted(class_map)]  # categories (unused here)
     return results
 
 
@@ -172,19 +172,19 @@ def build_min_coco_gt(dataset: YOLODetectionDataset, class_map: Dict[int, str], 
     Create a minimal COCO GT JSON from YOLO labels for evaluation.
     Includes 'info' and 'licenses' so pycocotools.loadRes() is happy.
     """
-    import json
-    from PIL import Image
+    import json as _json
+    from PIL import Image as _Image
 
     images = []
     annotations = []
     ann_id = 1
 
     for idx, img_path in enumerate(dataset.images):
-        with Image.open(img_path) as im:
+        with _Image.open(img_path) as im:
             w, h = im.size
         images.append({
             "id": idx,
-            "file_name": str(img_path.name),  # names are fine; COCO uses id for matching anyway
+            "file_name": str(img_path.name),
             "width": w,
             "height": h
         })
@@ -211,11 +211,7 @@ def build_min_coco_gt(dataset: YOLODetectionDataset, class_map: Dict[int, str], 
     categories = [{"id": i, "name": class_map[i]} for i in sorted(class_map)]
 
     coco_dict = {
-        "info": {
-            "description": "YOLO->COCO minimal GT",
-            "version": "1.0",
-            "year": 2025
-        },
+        "info": {"description": "YOLO->COCO minimal GT", "version": "1.0", "year": 2025},
         "licenses": [{"id": 1, "name": "unknown", "url": ""}],
         "images": images,
         "annotations": annotations,
@@ -224,7 +220,7 @@ def build_min_coco_gt(dataset: YOLODetectionDataset, class_map: Dict[int, str], 
 
     out_json.parent.mkdir(parents=True, exist_ok=True)
     with open(out_json, "w") as f:
-        json.dump(coco_dict, f)
+        _json.dump(coco_dict, f)
     return out_json
 
 
@@ -260,13 +256,110 @@ def speed_bench_callable(predict_callable, imgsz=640, device="cuda", runs=30) ->
 
 
 # -----------------------------
+# Torchvision model builders (version-safe)
+# -----------------------------
+
+def build_frcnn_resnet50_fpn_v2(num_classes: int):
+    try:
+        return torchvision.models.detection.fasterrcnn_resnet50_fpn_v2(
+            weights="DEFAULT", num_classes=num_classes
+        )
+    except TypeError:
+        m = torchvision.models.detection.fasterrcnn_resnet50_fpn_v2(weights="DEFAULT")
+        in_features = m.roi_heads.box_predictor.cls_score.in_features
+        m.roi_heads.box_predictor = torchvision.models.detection.faster_rcnn.FastRCNNPredictor(in_features, num_classes)
+        return m
+
+
+def build_frcnn_mobilenet_v3_fpn(num_classes: int):
+    try:
+        return torchvision.models.detection.fasterrcnn_mobilenet_v3_large_fpn(
+            weights="DEFAULT", num_classes=num_classes
+        )
+    except TypeError:
+        m = torchvision.models.detection.fasterrcnn_mobilenet_v3_large_fpn(weights="DEFAULT")
+        in_features = m.roi_heads.box_predictor.cls_score.in_features
+        m.roi_heads.box_predictor = torchvision.models.detection.faster_rcnn.FastRCNNPredictor(in_features, num_classes)
+        return m
+
+
+def build_retinanet_resnet50_fpn_v2(num_classes: int):
+    # RetinaNet expects num foreground classes (no background)
+    fg = num_classes - 1
+    try:
+        return torchvision.models.detection.retinanet_resnet50_fpn_v2(
+            weights="DEFAULT", num_classes=fg
+        )
+    except TypeError:
+        m = torchvision.models.detection.retinanet_resnet50_fpn_v2(weights="DEFAULT")
+        # reset classification head to new #classes
+        num_anchors = m.head.classification_head.num_anchors
+        m.head.classification_head.cls_logits = torch.nn.Conv2d(
+            m.backbone.out_channels, num_anchors * fg, kernel_size=3, stride=1, padding=1
+        )
+        torch.nn.init.normal_(m.head.classification_head.cls_logits.weight, std=0.01)
+        torch.nn.init.zeros_(m.head.classification_head.cls_logits.bias)
+        # Update attribute used in loss
+        m.head.classification_head.num_classes = fg
+        return m
+
+
+def build_ssdlite_mobilenet_v3(num_classes: int):
+    try:
+        return torchvision.models.detection.ssdlite320_mobilenet_v3_large(
+            weights="DEFAULT", num_classes=num_classes
+        )
+    except TypeError:
+        # Older TV: need to replace the head
+        m = torchvision.models.detection.ssdlite320_mobilenet_v3_large(weights="DEFAULT")
+        try:
+            from torchvision.models.detection.ssdlite import SSDLiteHead
+            m.head = SSDLiteHead(
+                in_channels=m.backbone.out_channels,
+                num_anchors=m.anchor_generator.num_anchors_per_location(),
+                num_classes=num_classes
+            )
+        except Exception:
+            # Very old versions: best-effort fallback (may need manual adjustments per version)
+            pass
+        return m
+
+
+def build_detr_resnet50(num_classes: int):
+    try:
+        return torchvision.models.detection.detr_resnet50(
+            weights="DEFAULT", num_classes=num_classes
+        )
+    except Exception:
+        # Fallback: manually swap the classifier (for mid versions)
+        m = torchvision.models.detection.detr_resnet50(weights="DEFAULT")
+        try:
+            in_features = m.class_embed.in_features
+            m.class_embed = torch.nn.Linear(in_features, num_classes)
+        except Exception:
+            # If this fails, your torchvision likely doesn't include DETR; skip in registry.
+            raise
+        return m
+
+
+TORCHVISION_DETS = {
+    "fasterrcnn_r50_fpn_v2": build_frcnn_resnet50_fpn_v2,
+    "fasterrcnn_mnv3_fpn": build_frcnn_mobilenet_v3_fpn,
+    "retinanet_r50_fpn_v2": build_retinanet_resnet50_fpn_v2,
+    "ssdlite_mnv3_320": build_ssdlite_mobilenet_v3,
+    # You can comment the next line out if your torchvision doesn't have DETR:
+    "detr_r50": build_detr_resnet50,
+}
+
+
+# -----------------------------
 # YOLO branch (Ultralytics)
 # -----------------------------
 
 def train_eval_yolo(model_name, data_yaml, epochs, imgsz, batch, device, workers, project, prefix) -> Dict:
     print(f"\n==== Training {model_name} (Ultralytics) ====")
     model = YOLO(model_name)
-    train_res = model.train(
+    _ = model.train(
         data=data_yaml,
         epochs=epochs,
         imgsz=imgsz,
@@ -285,6 +378,8 @@ def train_eval_yolo(model_name, data_yaml, epochs, imgsz, batch, device, workers
     box_map50 = float(metrics.get("metrics/mAP50(B)", float("nan")))
     box_precision = float(metrics.get("metrics/precision(B)", float("nan")))
     box_recall = float(metrics.get("metrics/recall(B)", float("nan")))
+    # AP_small if exposed by your Ultralytics version; else NaN
+    ap_small = float(metrics.get("metrics/mAP50-95/small(B)", float("nan")))
 
     pcount = params_count(model.model)
 
@@ -300,6 +395,7 @@ def train_eval_yolo(model_name, data_yaml, epochs, imgsz, batch, device, workers
         "params": pcount,
         "val/mAP50-95": box_map,
         "val/mAP50": box_map50,
+        "val/AP_small": ap_small,
         "val/precision": box_precision,
         "val/recall": box_recall,
         "infer_ms_per_img": mean_ms,
@@ -307,25 +403,13 @@ def train_eval_yolo(model_name, data_yaml, epochs, imgsz, batch, device, workers
         "approx_FPS": fps,
         "run_dir": str(model.trainer.save_dir) if hasattr(model, "trainer") else "",
     }
-    
+
     return row
 
 
 # -----------------------------
-# Faster R-CNN branch (torchvision)
+# Torchvision training/eval (generic)
 # -----------------------------
-
-def get_frcnn_model(num_classes: int):
-    """
-    Build Faster R-CNN (ResNet50-FPNv2). num_classes includes background.
-    """
-    model = torchvision.models.detection.fasterrcnn_resnet50_fpn_v2(weights="DEFAULT")
-    # Replace head for num_classes
-    in_features = model.roi_heads.box_predictor.cls_score.in_features
-    new_head = torchvision.models.detection.faster_rcnn.FastRCNNPredictor(in_features, num_classes)
-    model.roi_heads.box_predictor = new_head
-    return model
-
 
 @torch.no_grad()
 def evaluate_simple_map_at_05(model, data_loader, device="cuda", score_thr=0.001, iou_thr=0.5):
@@ -377,7 +461,6 @@ def evaluate_simple_map_at_05(model, data_loader, device="cuda", score_thr=0.001
                     cum_fp = np.cumsum(fp)
                     recalls = cum_tp / max(1, gt_idx.sum().item())
                     precisions = cum_tp / np.maximum(1, (cum_tp + cum_fp))
-                    # interpolate at r = 0.0..1.0 step=0.1
                     ap = 0.0
                     for r in np.linspace(0, 1, 11):
                         p = np.max(precisions[recalls >= r]) if np.any(recalls >= r) else 0.0
@@ -387,44 +470,36 @@ def evaluate_simple_map_at_05(model, data_loader, device="cuda", score_thr=0.001
     return {"mAP@0.5_simple": mAP}
 
 
-def train_eval_frcnn(
-    train_dir, val_dir, nc, class_names, epochs, batch_size, device, workers, imgsz, project, prefix
+def train_eval_torchvision_detector(
+    build_model_fn,        # callable: (num_classes) -> nn.Module
+    train_dir, val_dir, nc, class_names, epochs, batch_size, device, workers, imgsz, project, prefix, model_key
 ) -> Dict:
     """
-    Train Faster R-CNN on YOLO dataset directories + rich prints per epoch.
+    Generic trainer/evaluator for Torchvision detection models.
     """
     device = device if device is not None else ("cuda" if torch.cuda.is_available() else "cpu")
-    print("[FRCNN] Building datasets...")
     ds_train = YOLODetectionDataset(train_dir)
     ds_val = YOLODetectionDataset(val_dir)
-    print(f"[FRCNN] Train images: {len(ds_train)} | Val images: {len(ds_val)}")
-    print(f"[FRCNN] Device: {device} | Epochs: {epochs} | Batch size: {batch_size}")
+    num_classes = nc + 1
+    model = build_model_fn(num_classes).to(device)
 
-    num_classes = nc + 1  # include background
-    model = get_frcnn_model(num_classes)
-    model.to(device)
+    dl_train = DataLoader(ds_train, batch_size=batch_size, shuffle=True, num_workers=workers,
+                          collate_fn=collate_fn, pin_memory=True)
+    dl_val = DataLoader(ds_val, batch_size=1, shuffle=False, num_workers=workers,
+                        collate_fn=collate_fn, pin_memory=True)
 
-    # DataLoaders
-    dl_train = DataLoader(ds_train, batch_size=batch_size, shuffle=True,
-                          num_workers=workers, collate_fn=collate_fn, pin_memory=True)
-    dl_val = DataLoader(ds_val, batch_size=1, shuffle=False,
-                        num_workers=workers, collate_fn=collate_fn, pin_memory=True)
-
-    # Optimizer & LR schedule
     params = [p for p in model.parameters() if p.requires_grad]
     optimizer = torch.optim.SGD(params, lr=0.005, momentum=0.9, weight_decay=0.0005)
     lr_sched = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[int(0.7*epochs), int(0.9*epochs)], gamma=0.1)
 
-    save_dir = Path(project) / f"{prefix}_fasterrcnn_r50fpn"
+    save_dir = Path(project) / f"{prefix}_{model_key}"
     save_dir.mkdir(parents=True, exist_ok=True)
 
-    print("[FRCNN] Starting training...")
+    print(f"[{model_key}] Starting training...")
     for epoch in range(epochs):
-        epoch_start = time.time()
         model.train()
         losses = []
 
-        # ---- Training loop ----
         for imgs, targets in dl_train:
             imgs = [img.to(device) for img in imgs]
             targets = [{k: v.to(device) for k, v in t.items()} for t in targets]
@@ -436,12 +511,10 @@ def train_eval_frcnn(
             losses.append(loss.item())
 
         lr_sched.step()
-        epoch_time = time.time() - epoch_start
         mean_loss = float(np.mean(losses)) if len(losses) else float("nan")
-        print(f"[FRCNN] Epoch {epoch+1:03d}/{epochs} | Loss={mean_loss:.4f} | Time={epoch_time/60:.2f} min")
+        print(f"[{model_key}] Epoch {epoch+1:03d}/{epochs} | Loss={mean_loss:.4f}")
 
-        # ---- Quick validation every few epochs ----
-        if (epoch + 1) % 5 == 0 or epoch == epochs - 1:  # every 5 epochs or last
+        if (epoch + 1) % 5 == 0 or epoch == epochs - 1:
             model.eval()
             with torch.inference_mode():
                 aps = []
@@ -458,22 +531,20 @@ def train_eval_frcnn(
                             continue
                         biou = box_iou(boxes, gt_boxes)
                         max_iou, _ = torch.max(biou, dim=1)
-                        # crude per-image AP@0.5 proxy: fraction of preds with IoU>=0.5
                         aps.append(float((max_iou >= 0.5).float().mean()))
                 val_map50 = float(np.mean(aps)) if aps else 0.0
-            print(f"[FRCNN] └── Validation: mAP@0.5 ≈ {val_map50:.4f}")
+            print(f"[{model_key}] └── Quick Val: mAP@0.5 ≈ {val_map50:.4f}")
 
     # ---- Post-training speed benchmark ----
-    print("[FRCNN] Evaluating on val set...")
-    def _frcnn_forward(x):
+    def _forward_one(x):
         with torch.inference_mode():
             _ = model([x[0]])
-    mean_ms, std_ms, fps = speed_bench_callable(_frcnn_forward, imgsz=imgsz, device=device)
+    mean_ms, std_ms, fps = speed_bench_callable(_forward_one, imgsz=imgsz, device=device)
 
     # ---- Final metrics (COCO if available) ----
-    class_map = {i+1: n for i, n in enumerate(class_names)}
     if HAS_COCO:
-        print("[FRCNN] Running COCO evaluation (pycocotools)...")
+        print(f"[{model_key}] Running COCO evaluation...")
+        class_map = {i+1: n for i, n in enumerate(class_names)}
         coco_gt_json = save_dir / "val_gt_coco.json"
         build_min_coco_gt(ds_val, class_map, coco_gt_json)
         cocoGt = COCO(str(coco_gt_json))
@@ -508,25 +579,24 @@ def train_eval_frcnn(
         cocoEval = COCOeval(cocoGt, cocoGt.loadRes(str(pred_json_path)), iouType='bbox')
         cocoEval.evaluate(); cocoEval.accumulate(); cocoEval.summarize()
         stats = cocoEval.stats
-        mAP_50_95 = float(stats[0]); mAP_50 = float(stats[1])
-        print(f"[FRCNN] COCO mAP50-95={mAP_50_95:.4f} | mAP50={mAP_50:.4f}")
+        mAP_50_95 = float(stats[0]); mAP_50 = float(stats[1]); AP_small = float(stats[3])
     else:
-        print("[FRCNN] pycocotools not installed; using simple mAP@0.5 estimator.")
+        print(f"[{model_key}] pycocotools not installed; using simple mAP@0.5 estimator.")
         m = evaluate_simple_map_at_05(model, dl_val, device=device)
-        mAP_50_95 = float("nan"); mAP_50 = float(m["mAP@0.5_simple"])
-        print(f"[FRCNN] simple mAP@0.5={mAP_50:.4f}")
+        mAP_50_95 = float("nan"); mAP_50 = float(m["mAP@0.5_simple"]); AP_small = float("nan")
 
     # ---- Save weights ----
-    weights_path = save_dir / "fasterrcnn_resnet50_fpn_v2_final.pt"
+    weights_path = save_dir / f"{model_key}_final.pt"
     torch.save(model.state_dict(), weights_path)
-    print(f"[FRCNN] Saved model weights to: {weights_path}")
+    print(f"[{model_key}] Saved model weights to: {weights_path}")
 
     row = {
         "framework": "Torchvision",
-        "model": "fasterrcnn_resnet50_fpn_v2",
+        "model": model_key,
         "params": params_count(model),
         "val/mAP50-95": mAP_50_95,
         "val/mAP50": mAP_50,
+        "val/AP_small": AP_small,
         "val/precision": float("nan"),
         "val/recall": float("nan"),
         "infer_ms_per_img": mean_ms,
@@ -534,7 +604,7 @@ def train_eval_frcnn(
         "approx_FPS": fps,
         "run_dir": str(save_dir),
     }
-    print(f"[FRCNN] Artifacts saved to: {save_dir}")
+    print(f"[{model_key}] Artifacts saved to: {save_dir}")
     return row
 
 
@@ -543,12 +613,12 @@ def train_eval_frcnn(
 # -----------------------------
 
 def main():
-    parser = argparse.ArgumentParser("Compare YOLO (Ultralytics) and Faster R-CNN on a YOLO dataset")
+    parser = argparse.ArgumentParser("Compare YOLO (Ultralytics) and multiple Torchvision detectors on a YOLO dataset")
     parser.add_argument("--data", required=True, help="Path to YOLO data YAML")
-    parser.add_argument("--models", nargs="+", default=[], help="Ultralytics YOLO models to train")
+    parser.add_argument("--models", nargs="+", default=[], help="Ultralytics models to train (e.g., yolo11n.pt yolov8l.pt rtdetr-l.pt)")
     parser.add_argument("--epochs", type=int, default=50)
     parser.add_argument("--imgsz", type=int, default=1024)
-    parser.add_argument("--batch", type=int, default=-1, help="-1 = auto for Ultralytics; used as batch_size for FRCNN")
+    parser.add_argument("--batch", type=int, default=-1, help="-1 = auto for Ultralytics; used as batch_size for Torchvision")
     parser.add_argument("--device", default="cuda", help="'cuda', '0', 'cpu', etc.")
     parser.add_argument("--workers", type=int, default=8)
     parser.add_argument("--project", default="runs/compare")
@@ -570,7 +640,7 @@ def main():
         if os.path.isdir(x):
             return x
         if os.path.isfile(x):
-            # if it's a text file of image paths, we try to use the parent 'images' folder
+            # if it's a text file of image paths, use its parent folder
             p = Path(x).parent
             return str(p)
         return x
@@ -581,9 +651,9 @@ def main():
     project_path = Path(args.project)
     project_path.mkdir(parents=True, exist_ok=True)
 
-    rows = []
+    rows: List[Dict] = []
 
-    # YOLO models
+    # ---- Ultralytics YOLO / RT-DETR models
     for m in args.models:
         row = train_eval_yolo(
             model_name=m,
@@ -599,37 +669,49 @@ def main():
         print(json.dumps(row, indent=2))
         rows.append(row)
 
-    # Faster R-CNN (Torchvision)
-    fr_row = train_eval_frcnn(
-        train_dir=train_images_dir,
-        val_dir=val_images_dir,
-        nc=nc,
-        class_names=names,
-        epochs=args.epochs,
-        batch_size=(args.batch if args.batch != -1 else 2),
-        device=args.device or ("cuda" if torch.cuda.is_available() else "cpu"),
-        workers=args.workers,
-        imgsz=args.imgsz,
-        project=args.project,
-        prefix=args.name_prefix
-    )
-    print(json.dumps(fr_row, indent=2))
-    rows.append(fr_row)
+    # ---- Torchvision baselines
+    for key, builder in TORCHVISION_DETS.items():
+        try:
+            row = train_eval_torchvision_detector(
+                build_model_fn=builder,
+                train_dir=train_images_dir,
+                val_dir=val_images_dir,
+                nc=nc,
+                class_names=names,
+                epochs=args.epochs,
+                batch_size=(args.batch if args.batch != -1 else 2),
+                device=args.device or ("cuda" if torch.cuda.is_available() else "cpu"),
+                workers=args.workers,
+                imgsz=args.imgsz,
+                project=args.project,
+                prefix=args.name_prefix,
+                model_key=key
+            )
+            print(json.dumps(row, indent=2))
+            rows.append(row)
+        except Exception as e:
+            print(f"[WARN] Skipping {key} due to error: {e}")
 
-    # Save comparison CSV
+    # ---- Save comparison CSV
     df = pd.DataFrame(rows)
-    out_csv = project_path / "comparison_yolo_frcnn.csv"
+    out_csv = project_path / "comparison_detectors.csv"
     df.to_csv(out_csv, index=False)
     print(f"\nSaved comparison table to: {out_csv.resolve()}\n")
-    print(df.sort_values(["val/mAP50-95"], ascending=False))
+    # Sort by mAP50-95 if present, else by mAP50
+    sort_cols = [c for c in ["val/mAP50-95", "val/mAP50"] if c in df.columns]
+    if sort_cols:
+        print(df.sort_values(sort_cols, ascending=False))
+    else:
+        print(df)
 
 
 if __name__ == "__main__":
+    # Example inline args for notebooks. Adjust paths/models as needed.
     import sys
     sys.argv = [
         "notebook",
         "--data", "/content/drive/MyDrive/blackbird/mite_detection/TSSM-Detection-v2-209/data.yaml",
-        "--models", "yolo11n.pt", "yolo11l.pt", "yolov8n.pt", "yolov8l.pt",
+        "--models", "yolo11n.pt", "yolo11l.pt", "yolov8n.pt", "yolov8l.pt", "rtdetr-l.pt",
         "--epochs", "50",
         "--imgsz", "1024",
         "--batch", "-1",
